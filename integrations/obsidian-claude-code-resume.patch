@@ -1,0 +1,124 @@
+diff --git a/src/claude-terminal-view.ts b/src/claude-terminal-view.ts
+index d99f080..05a93a9 100644
+--- a/src/claude-terminal-view.ts
++++ b/src/claude-terminal-view.ts
+@@ -32,6 +32,14 @@ interface ReadyPromiseCallbacks {
+   reject: (reason: Error) => void;
+ }
+ 
++// Per-view spawn override: lets a caller (e.g. an external plugin) launch a
++// terminal in a specific working directory and/or with extra CLI arguments
++// (such as `--resume <id>`) instead of the global settings-derived defaults.
++export interface TerminalSpawnOverride {
++  cwd?: string;
++  extraArgs?: string[];
++}
++
+ export class ClaudeTerminalView extends ItemView {
+   private static nextInstanceId = 1;
+ 
+@@ -52,7 +60,8 @@ export class ClaudeTerminalView extends ItemView {
+     private readonly getVaultPath: () => string,
+     private readonly getPluginDir: () => string,
+     private readonly getSystemPromptFile: () => string | null = () => null,
+-    private readonly getMetrics: () => EmissionMetrics | null = () => null
++    private readonly getMetrics: () => EmissionMetrics | null = () => null,
++    private readonly spawnOverride: TerminalSpawnOverride | null = null
+   ) {
+     super(leaf);
+     this.icon = "claude-ai";
+@@ -236,12 +245,15 @@ export class ClaudeTerminalView extends ItemView {
+ 
+     const settings = this.getSettings();
+     const vaultPath = this.getVaultPath();
+-    const cwd = settings.cwdOverride || vaultPath;
++    const cwd = this.spawnOverride?.cwd || settings.cwdOverride || vaultPath;
+ 
+     const args: string[] = [];
+     if (settings.extraArgs.trim()) {
+       args.push(...settings.extraArgs.trim().split(/\s+/));
+     }
++    if (this.spawnOverride?.extraArgs && this.spawnOverride.extraArgs.length > 0) {
++      args.push(...this.spawnOverride.extraArgs);
++    }
+ 
+     const promptFile = this.getSystemPromptFile();
+     if (promptFile) {
+diff --git a/src/main.ts b/src/main.ts
+index fc21a18..43f5df0 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -8,7 +8,11 @@ import {
+   COMMAND_FOCUS_TERMINAL,
+   COMMAND_NEW_TERMINAL,
+ } from "./constants";
+-import { ClaudeTerminalView, wrapBackticks } from "./claude-terminal-view";
++import {
++  ClaudeTerminalView,
++  wrapBackticks,
++  type TerminalSpawnOverride,
++} from "./claude-terminal-view";
+ import {
+   ClaudeTerminalSettings,
+   ClaudeTerminalSettingTab,
+@@ -27,6 +31,7 @@ export default class ClaudeTerminalPlugin extends Plugin {
+   private mcpBridge: McpContextBridge | null = null;
+   private promptWriter: SystemPromptWriter | null = null;
+   private emissionMetrics: EmissionMetrics | null = null;
++  private pendingTerminalSpawnOverride: TerminalSpawnOverride | null = null;
+ 
+   async onload(): Promise<void> {
+     await this.loadSettings();
+@@ -69,7 +74,8 @@ export default class ClaudeTerminalPlugin extends Plugin {
+         () => this.getVaultBasePath(),
+         () => this.getPluginDir(),
+         () => this.promptWriter?.getPromptFilePath() ?? null,
+-        () => this.emissionMetrics
++        () => this.emissionMetrics,
++        this.pendingTerminalSpawnOverride
+       );
+     });
+ 
+@@ -305,6 +311,42 @@ export default class ClaudeTerminalPlugin extends Plugin {
+     return leaf.view as ClaudeTerminalView;
+   }
+ 
++  // Public integration point for other plugins: open a Claude Code terminal
++  // rooted at an arbitrary working directory, optionally resuming a specific
++  // session and optionally seeding an initial prompt once the terminal is
++  // ready. The spawn override is captured by the view factory at construction,
++  // so clearing the pending field after `createNewTerminal` resolves is safe.
++  async openClaudeSessionInFolder(
++    workingDirectoryAbsolutePath: string,
++    resumeSessionId?: string,
++    initialPromptText?: string
++  ): Promise<ClaudeTerminalView | null> {
++    const extraArgs = resumeSessionId ? ["--resume", resumeSessionId] : [];
++    this.pendingTerminalSpawnOverride = {
++      cwd: workingDirectoryAbsolutePath,
++      extraArgs,
++    };
++
++    let terminalView: ClaudeTerminalView | null;
++    try {
++      terminalView = await this.createNewTerminal();
++    } finally {
++      this.pendingTerminalSpawnOverride = null;
++    }
++
++    if (terminalView && initialPromptText && initialPromptText.length > 0) {
++      try {
++        await terminalView.ensureReady();
++        terminalView.sendText(initialPromptText);
++      } catch {
++        // Terminal failed to become ready; the spawned claude process has
++        // already surfaced its own error notice, so swallow here.
++      }
++    }
++
++    return terminalView;
++  }
++
+   private setupMcp(): void {
+     if (!this.settings.enableMcp) return;
+ 

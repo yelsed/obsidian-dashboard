@@ -1,0 +1,542 @@
+/*
+ * Vault Dashboard plugin global stylesheet.
+ *
+ * Obsidian auto-loads this file (styles.css next to manifest.json) for every
+ * enabled plugin. It is the only stylesheet that can override Obsidian's
+ * default button, list, and section rules — Svelte's scoped styles cannot
+ * win against them on specificity alone.
+ *
+ * Contents:
+ *   1. Design tokens (the single source of truth for typography, colour,
+ *      spacing, motion).
+ *   2. Workspace leaf reset (so the dashboard owns its own pane).
+ *   3. Aggressive Obsidian-default resets scoped to .vault-dashboard.
+ *   4. Shared primitives (panel, status dot) used by Svelte components.
+ *
+ * Per-component styling lives inside each Svelte file. This sheet only owns
+ * what has to escape Svelte's scoping.
+ */
+
+.vault-dashboard {
+  --vault-dashboard-font-family-mono:
+    "JetBrains Mono",
+    "Berkeley Mono",
+    "IBM Plex Mono",
+    "Fira Code",
+    "SF Mono",
+    "Menlo",
+    "Consolas",
+    ui-monospace,
+    monospace;
+
+  --vault-dashboard-font-size-label: 11px;
+  --vault-dashboard-font-size-body: 14px;
+  --vault-dashboard-font-size-emphasis: 18px;
+
+  --vault-dashboard-font-weight-regular: 400;
+  --vault-dashboard-font-weight-medium: 500;
+  --vault-dashboard-font-weight-bold: 700;
+
+  --vault-dashboard-line-height-tight: 1.25;
+  --vault-dashboard-line-height-default: 1.5;
+
+  --vault-dashboard-letter-spacing-flat: 0;
+  --vault-dashboard-letter-spacing-uppercase: 0.08em;
+
+  --vault-dashboard-space-row: 8px;
+  --vault-dashboard-space-inline: 12px;
+  --vault-dashboard-space-panel-inner: 20px;
+  --vault-dashboard-space-panel-outer: 28px;
+  --vault-dashboard-space-section: 24px;
+  --vault-dashboard-space-pane: 28px;
+
+  --vault-dashboard-border-width: 1px;
+  --vault-dashboard-border-radius: 0;
+  --vault-dashboard-border-color-default: var(--background-modifier-border);
+  --vault-dashboard-border-color-strong: var(--background-modifier-border-hover);
+  --vault-dashboard-border-color-accent: var(--interactive-accent);
+
+  --vault-dashboard-surface-background: var(--background-primary);
+  --vault-dashboard-surface-panel: var(--background-secondary);
+  --vault-dashboard-surface-panel-hover: var(--background-secondary-alt);
+  --vault-dashboard-surface-overlay: var(--background-primary-alt);
+
+  --vault-dashboard-text-primary: var(--text-normal);
+  --vault-dashboard-text-secondary: var(--text-muted);
+  --vault-dashboard-text-faint: var(--text-faint);
+  --vault-dashboard-text-accent: var(--text-accent);
+  --vault-dashboard-text-on-accent: var(--text-on-accent);
+
+  --vault-dashboard-color-status-running: var(--color-green);
+  --vault-dashboard-color-status-paused: var(--color-yellow);
+  --vault-dashboard-color-status-stopped: var(--color-red);
+  --vault-dashboard-color-status-idle: var(--text-faint);
+
+  --vault-dashboard-color-accent-cyan: var(--color-cyan);
+  --vault-dashboard-color-accent-magenta: var(--color-purple);
+  --vault-dashboard-color-accent-blue: var(--interactive-accent);
+
+  --vault-dashboard-color-freshness-active: var(--color-green);
+  --vault-dashboard-color-freshness-cooling: var(--color-yellow);
+  --vault-dashboard-color-freshness-cold: var(--text-faint);
+
+  --vault-dashboard-motion-duration-instant: 60ms;
+  --vault-dashboard-motion-duration-quick: 120ms;
+  --vault-dashboard-motion-easing-snap: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --vault-dashboard-tabular-feature-settings: "tnum" 1, "zero" 1;
+}
+
+.vault-dashboard[data-density="compact"] {
+  --vault-dashboard-space-row: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vault-dashboard {
+    --vault-dashboard-motion-duration-instant: 0ms;
+    --vault-dashboard-motion-duration-quick: 0ms;
+  }
+}
+
+.workspace-leaf-content[data-type="vault-dashboard"] .view-content {
+  padding: 0;
+  overflow: hidden;
+  background: var(--vault-dashboard-surface-background);
+}
+
+.vault-dashboard,
+.vault-dashboard * {
+  font-family: var(--vault-dashboard-font-family-mono);
+  box-sizing: border-box;
+}
+
+.vault-dashboard {
+  font-size: var(--vault-dashboard-font-size-body);
+  line-height: var(--vault-dashboard-line-height-default);
+  color: var(--vault-dashboard-text-primary);
+  background: var(--vault-dashboard-surface-background);
+  font-feature-settings: var(--vault-dashboard-tabular-feature-settings);
+}
+
+.vault-dashboard button {
+  all: unset;
+  display: inline-flex;
+  align-items: baseline;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.vault-dashboard button:hover {
+  background: transparent;
+  box-shadow: none;
+}
+
+.vault-dashboard button:focus-visible {
+  outline: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-accent);
+  outline-offset: 2px;
+}
+
+:where(.vault-dashboard) ul,
+:where(.vault-dashboard) ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+:where(.vault-dashboard) li {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:where(.vault-dashboard) section {
+  margin: 0;
+  padding: 0;
+}
+
+:where(.vault-dashboard) h1,
+:where(.vault-dashboard) h2,
+:where(.vault-dashboard) h3,
+:where(.vault-dashboard) h4,
+:where(.vault-dashboard) h5,
+:where(.vault-dashboard) h6 {
+  margin: 0;
+  padding: 0;
+  font-weight: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  border: none;
+}
+
+:where(.vault-dashboard) p {
+  margin: 0;
+  padding: 0;
+}
+
+.vault-dashboard-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--vault-dashboard-surface-panel);
+  border: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-strong);
+  border-radius: var(--vault-dashboard-border-radius);
+  padding: var(--vault-dashboard-space-panel-outer);
+  color: var(--vault-dashboard-text-primary);
+  font-feature-settings: var(--vault-dashboard-tabular-feature-settings);
+}
+
+.vault-dashboard-panel-heading {
+  font-size: var(--vault-dashboard-font-size-label);
+  font-weight: var(--vault-dashboard-font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: var(--vault-dashboard-letter-spacing-uppercase);
+  color: var(--vault-dashboard-text-secondary);
+  padding-bottom: var(--vault-dashboard-space-inline);
+  margin-bottom: var(--vault-dashboard-space-section);
+  border-bottom: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-default);
+}
+
+.vault-dashboard-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vault-dashboard-color-status-idle);
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.vault-dashboard-status-dot[data-status="running"] {
+  background: var(--vault-dashboard-color-status-running);
+}
+
+.vault-dashboard-status-dot[data-status="paused"] {
+  background: var(--vault-dashboard-color-status-paused);
+}
+
+.vault-dashboard-status-dot[data-status="stopped"] {
+  background: var(--vault-dashboard-color-status-stopped);
+}
+
+.vault-dashboard-procrast-details-modal {
+  font-family: var(--font-monospace);
+  color: var(--text-normal);
+}
+
+.vault-dashboard-procrast-details-modal h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.vault-dashboard-procrast-detail-kv {
+  display: grid;
+  grid-template-columns: 8ch minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.vault-dashboard-procrast-detail-key,
+.vault-dashboard-procrast-detail-heading {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vault-dashboard-procrast-detail-value {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.vault-dashboard-procrast-detail-heading {
+  margin: 20px 0 6px;
+}
+
+.vault-dashboard-procrast-detail-paragraph {
+  margin: 0;
+  max-width: 76ch;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.vault-dashboard-procrast-detail-list {
+  margin: 0 0 0 20px;
+  padding: 0;
+  max-width: 82ch;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.vault-dashboard-procrast-detail-list li + li {
+  margin-top: 8px;
+}
+
+.vault-dashboard-jira-issues-modal {
+  font-family: var(--font-monospace);
+  color: var(--text-normal);
+}
+
+.vault-dashboard-jira-issues-modal h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.vault-dashboard-jira-issues-modal-list {
+  margin-top: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vault-dashboard-jira-issues-modal-empty {
+  margin: 12px 0;
+  color: var(--text-muted);
+}
+
+.vault-dashboard-jira-issues-modal-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: 12px;
+}
+
+.vault-dashboard-jira-issues-modal-key {
+  color: var(--color-cyan);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.vault-dashboard-jira-issues-modal-key:hover {
+  text-decoration: underline;
+}
+
+.vault-dashboard-jira-issues-modal-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-normal);
+}
+
+.vault-dashboard-jira-issues-modal-status {
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.vault-dashboard-jira-issues-modal-status[data-status-category="indeterminate"] {
+  color: var(--color-yellow);
+}
+
+.vault-dashboard-jira-issues-modal-status[data-status-category="done"] {
+  color: var(--color-green);
+}
+
+.vault-dashboard-jira-issues-modal-due {
+  color: var(--text-faint);
+  font-style: italic;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.vault-dashboard-jira-issues-modal-fix {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-family: inherit;
+}
+
+.vault-dashboard-jira-issues-modal-fix:hover {
+  color: var(--color-cyan);
+  border-color: var(--color-cyan);
+}
+
+/* Settings: each dashboard tab is a collapsible accordion so the page is
+   navigable when several tabs each carry widgets and pinned projects. */
+.vault-dashboard-settings-tab-section {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  margin: 12px 0;
+  padding: 0 16px;
+  background: var(--background-secondary);
+}
+
+.vault-dashboard-settings-tab-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 12px 0;
+  cursor: pointer;
+  list-style: none;
+  font-weight: 700;
+}
+
+.vault-dashboard-settings-tab-summary::-webkit-details-marker {
+  display: none;
+}
+
+.vault-dashboard-settings-tab-summary::before {
+  content: "▸";
+  color: var(--text-muted);
+}
+
+.vault-dashboard-settings-tab-section[open] > .vault-dashboard-settings-tab-summary::before {
+  content: "▾";
+}
+
+.vault-dashboard-settings-tab-summary-title {
+  color: var(--text-normal);
+}
+
+.vault-dashboard-settings-tab-summary-meta {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.vault-dashboard-settings-tab-section[open] > .vault-dashboard-settings-tab-summary {
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 8px;
+}
+
+/* Widgets as a compact grid of toggle chips instead of a long stack of rows. */
+.vault-dashboard-settings-widget-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.vault-dashboard-settings-widget-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.vault-dashboard-settings-widget-chip:hover {
+  border-color: var(--text-muted);
+}
+
+.vault-dashboard-settings-widget-chip.is-enabled {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+}
+
+.vault-dashboard-settings-widget-chip-mark {
+  width: 1ch;
+  color: var(--interactive-accent);
+  font-weight: 700;
+}
+
+.vault-dashboard-settings-widget-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* When a tab has more than one sub-tab, each widget gets a row: the toggle chip plus a
+   dropdown choosing which sub-tab it lives on. */
+.vault-dashboard-settings-widget-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.vault-dashboard-settings-widget-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vault-dashboard-settings-widget-row .vault-dashboard-settings-widget-chip {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.vault-dashboard-settings-widget-row-select {
+  flex: 0 0 auto;
+  max-width: 45%;
+}
+
+/* Each pinned project bounded in its own card, name + Remove in the header. */
+.vault-dashboard-settings-project-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  margin: 10px 0;
+  padding: 0 12px 8px;
+  background: var(--background-primary);
+}
+
+.vault-dashboard-settings-project-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0 6px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.vault-dashboard-settings-project-card-title {
+  font-weight: 700;
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-dashboard-settings-project-card-remove {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.vault-dashboard-settings-project-card-remove:hover {
+  color: var(--text-error);
+  border-color: var(--text-error);
+}

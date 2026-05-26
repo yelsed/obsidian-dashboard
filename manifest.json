@@ -1,0 +1,10 @@
+{
+  "id": "vault-dashboard",
+  "name": "Vault Dashboard",
+  "version": "0.1.0",
+  "minAppVersion": "1.12.4",
+  "description": "A super overview of your vault: recent files, tasks, tags, graph insights, pinned projects with Docker status, and Work/Private context tabs.",
+  "author": "Desley Langeveld",
+  "authorUrl": "",
+  "isDesktopOnly": true
+}
