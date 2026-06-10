@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import { buildExternalCommandEnvironment } from "./externalCommandEnvironment";
 import { writable, type Readable } from "svelte/store";
 
 export type DockerAvailability = "available" | "not-installed" | "errored";
@@ -112,7 +113,7 @@ function runDockerPsCommand(): Promise<string> {
       spawnedDockerProcess = spawn(
         "docker",
         ["ps", "--all", "--no-trunc", "--format", "{{json .}}"],
-        { windowsHide: true },
+        { windowsHide: true, env: buildExternalCommandEnvironment() },
       );
     } catch (spawnError) {
       reject(spawnError instanceof Error ? spawnError : new Error(String(spawnError)));

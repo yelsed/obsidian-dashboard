@@ -1,7 +1,12 @@
-import type { App, EventRef, TFile } from "obsidian";
+import { TFile, type App, type EventRef } from "obsidian";
 import { writable, type Readable } from "svelte/store";
 import { debounce } from "./format";
-import { isFilePathWithinFolderScopes, type FolderPath } from "../settings";
+import {
+  buildDailyNotePathForDate,
+  formatDailyNoteBasenameForDate,
+  isFilePathWithinFolderScopes,
+  type FolderPath,
+} from "../settings";
 
 export type OpenTask = {
   taskContent: string;
@@ -21,6 +26,7 @@ export type OpenTasksSnapshot = {
 export type OpenTasksStore = {
   store: Readable<OpenTasksSnapshot>;
   setFolderScopes: (folderScopes: FolderPath[]) => void;
+  setDailyNoteFolderPath: (dailyNoteFolderPath: FolderPath) => void;
   destroy: () => void;
 };
 
@@ -32,8 +38,10 @@ export const OPEN_TASK_LINE_PATTERN = /^[\s>]*[-*+]\s*\[\s\]\s*(.*)$/;
 export function createOpenTasksStore(
   obsidianApplication: App,
   initialFolderScopes: FolderPath[] = [],
+  initialDailyNoteFolderPath: FolderPath = "",
 ): OpenTasksStore {
   let currentFolderScopes: FolderPath[] = initialFolderScopes;
+  let currentDailyNoteFolderPath: FolderPath = initialDailyNoteFolderPath;
 
   const snapshotStore = writable<OpenTasksSnapshot>({
     openTasks: [],
@@ -51,7 +59,11 @@ export function createOpenTasksStore(
     }
     isBuildingSnapshot = true;
     try {
-      const snapshot = await buildSnapshot(obsidianApplication, currentFolderScopes);
+      const snapshot = await buildSnapshot(
+        obsidianApplication,
+        currentFolderScopes,
+        currentDailyNoteFolderPath,
+      );
       snapshotStore.set(snapshot);
     } finally {
       isBuildingSnapshot = false;
@@ -76,6 +88,11 @@ export function createOpenTasksStore(
     void rebuildSnapshot();
   }
 
+  function setDailyNoteFolderPath(nextDailyNoteFolderPath: FolderPath): void {
+    currentDailyNoteFolderPath = nextDailyNoteFolderPath;
+    void rebuildSnapshot();
+  }
+
   function destroy(): void {
     refreshSnapshotDebounced.cancel();
     for (const eventReference of registeredEventReferences) {
@@ -83,19 +100,22 @@ export function createOpenTasksStore(
     }
   }
 
-  return { store: snapshotStore, setFolderScopes, destroy };
+  return { store: snapshotStore, setFolderScopes, setDailyNoteFolderPath, destroy };
 }
 
 async function buildSnapshot(
   obsidianApplication: App,
   folderScopes: FolderPath[],
+  dailyNoteFolderPath: FolderPath,
 ): Promise<OpenTasksSnapshot> {
   const startOfTodayTimestamp = startOfTodayMilliseconds();
   const todayLabel = formatDailyNoteLabelForToday();
+  const todayDailyNotePath = buildDailyNotePathForDate(dailyNoteFolderPath, new Date());
+  const resolvedDailyNoteFile = obsidianApplication.vault.getAbstractFileByPath(
+    todayDailyNotePath,
+  );
   const todayDailyNoteFile =
-    obsidianApplication.vault
-      .getMarkdownFiles()
-      .find((file: TFile) => file.basename === todayLabel.replace(/\s+daily$/, "")) ?? null;
+    resolvedDailyNoteFile instanceof TFile ? resolvedDailyNoteFile : null;
   const todayDailyNoteExists = todayDailyNoteFile !== null;
 
   const candidateFiles = collectTaskCandidateFiles(
@@ -176,10 +196,6 @@ function startOfTodayMilliseconds(): number {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return today.getTime();
-}
-
-export function formatDailyNoteBasenameForDate(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function formatDailyNoteLabelForToday(): string {

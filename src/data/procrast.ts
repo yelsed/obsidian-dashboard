@@ -1,5 +1,6 @@
 import { spawn } from "child_process";
 import { writable, type Readable } from "svelte/store";
+import { buildExternalCommandEnvironment } from "./externalCommandEnvironment";
 
 export type ProcrastAvailability =
   | "checking"
@@ -243,6 +244,7 @@ function runProcrastCommand(commandArguments: string[]): Promise<ProcrastProcess
   return new Promise((resolve) => {
     const childProcess = spawn("procrast", commandArguments, {
       stdio: ["ignore", "pipe", "pipe"],
+      env: buildExternalCommandEnvironment(),
     });
 
     let stdout = "";

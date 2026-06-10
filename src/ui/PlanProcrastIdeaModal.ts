@@ -375,9 +375,12 @@ function clonePluginSettings(settings: PluginSettings): PluginSettings {
   return {
     activeTabName: settings.activeTabName,
     workspaceStartup: { ...settings.workspaceStartup },
+    dailyTaskReminder: { ...settings.dailyTaskReminder },
     tabs: settings.tabs.map((dashboardTab) => ({
       name: dashboardTab.name,
       folderScopes: [...dashboardTab.folderScopes],
+      dailyNoteFolderPath: dashboardTab.dailyNoteFolderPath,
+      workingDayIndices: [...dashboardTab.workingDayIndices],
       enabledWidgets: [...dashboardTab.enabledWidgets],
       collapsedWidgetIdentifiers: [...dashboardTab.collapsedWidgetIdentifiers],
       pinnedProjects: dashboardTab.pinnedProjects.map((pinnedProject) => ({

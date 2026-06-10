@@ -8,7 +8,6 @@ export type JiraProjectKey = string;
 export type WidgetIdentifier =
   | "recent-files"
   | "daily-tasks"
-  | "today-recap"
   | "tag-folder-stats"
   | "graph-insights"
   | "pinned-projects"
@@ -19,7 +18,6 @@ export type WidgetIdentifier =
 export const ALL_WIDGET_IDENTIFIERS: readonly WidgetIdentifier[] = [
   "recent-files",
   "daily-tasks",
-  "today-recap",
   "tag-folder-stats",
   "graph-insights",
   "pinned-projects",
@@ -31,7 +29,6 @@ export const ALL_WIDGET_IDENTIFIERS: readonly WidgetIdentifier[] = [
 export const DEFAULT_ENABLED_WIDGET_IDENTIFIERS: readonly WidgetIdentifier[] = [
   "recent-files",
   "daily-tasks",
-  "today-recap",
   "tag-folder-stats",
   "graph-insights",
   "pinned-projects",
@@ -41,8 +38,7 @@ export const DEFAULT_ENABLED_WIDGET_IDENTIFIERS: readonly WidgetIdentifier[] = [
 
 export const WIDGET_DISPLAY_LABEL_BY_IDENTIFIER: Record<WidgetIdentifier, string> = {
   "recent-files": "Recent files",
-  "daily-tasks": "Daily note + tasks",
-  "today-recap": "Today",
+  "daily-tasks": "Daily tasks + next workday",
   "tag-folder-stats": "Tags + folders",
   "graph-insights": "Graph insights",
   "pinned-projects": "Pinned projects",
@@ -92,9 +88,16 @@ export function buildDefaultWidgetSubTabs(): WidgetSubTab[] {
   ];
 }
 
+// JavaScript Date.getDay() index: 0 = Sunday … 6 = Saturday.
+export type DayOfWeekIndex = number;
+
+export const DEFAULT_WORKING_DAY_INDICES: readonly DayOfWeekIndex[] = [1, 2, 3, 4, 5] as const;
+
 export type DashboardTab = {
   name: string;
   folderScopes: FolderPath[];
+  dailyNoteFolderPath: FolderPath;
+  workingDayIndices: DayOfWeekIndex[];
   enabledWidgets: WidgetIdentifier[];
   collapsedWidgetIdentifiers: WidgetIdentifier[];
   pinnedProjects: PinnedProject[];
@@ -107,10 +110,23 @@ export type WorkspaceStartupSettings = {
   workspaceLayoutPromptSuppressed: boolean;
 };
 
+export type DailyTaskReminderSettings = {
+  isEnabled: boolean;
+  timeOfDay: string;
+};
+
+export const DEFAULT_DAILY_TASK_REMINDER_SETTINGS: DailyTaskReminderSettings = {
+  isEnabled: true,
+  timeOfDay: "15:45",
+};
+
+const TIME_OF_DAY_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 export type PluginSettings = {
   tabs: DashboardTab[];
   activeTabName: string;
   workspaceStartup: WorkspaceStartupSettings;
+  dailyTaskReminder: DailyTaskReminderSettings;
   procrastIdeaFolderMappings: ProcrastIdeaFolderMapping[];
   jiraConnection: JiraConnectionSettings;
 };
@@ -140,6 +156,8 @@ export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
     {
       name: "Work",
       folderScopes: [],
+      dailyNoteFolderPath: "",
+      workingDayIndices: [...DEFAULT_WORKING_DAY_INDICES],
       enabledWidgets: [...DEFAULT_ENABLED_WIDGET_IDENTIFIERS],
       collapsedWidgetIdentifiers: [],
       pinnedProjects: [],
@@ -149,6 +167,8 @@ export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
     {
       name: "Private",
       folderScopes: [],
+      dailyNoteFolderPath: "",
+      workingDayIndices: [...DEFAULT_WORKING_DAY_INDICES],
       enabledWidgets: [...DEFAULT_ENABLED_WIDGET_IDENTIFIERS],
       collapsedWidgetIdentifiers: [],
       pinnedProjects: [],
@@ -158,6 +178,7 @@ export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
   ],
   activeTabName: "Work",
   workspaceStartup: { ...DEFAULT_WORKSPACE_STARTUP_SETTINGS },
+  dailyTaskReminder: { ...DEFAULT_DAILY_TASK_REMINDER_SETTINGS },
   procrastIdeaFolderMappings: [],
   jiraConnection: { ...DEFAULT_JIRA_CONNECTION_SETTINGS },
 };
@@ -195,10 +216,33 @@ export function migrateLoadedSettings(rawLoadedSettings: unknown): PluginSetting
     tabs: migratedTabs,
     activeTabName,
     workspaceStartup,
+    dailyTaskReminder: migrateLoadedDailyTaskReminderSettings(
+      loadedSettingsRecord.dailyTaskReminder,
+    ),
     procrastIdeaFolderMappings: migrateLoadedProcrastIdeaFolderMappings(
       loadedSettingsRecord.procrastIdeaFolderMappings,
     ),
     jiraConnection: migrateLoadedJiraConnectionSettings(loadedSettingsRecord.jiraConnection),
+  };
+}
+
+function migrateLoadedDailyTaskReminderSettings(
+  rawDailyTaskReminder: unknown,
+): DailyTaskReminderSettings {
+  if (rawDailyTaskReminder === null || typeof rawDailyTaskReminder !== "object") {
+    return { ...DEFAULT_DAILY_TASK_REMINDER_SETTINGS };
+  }
+  const rawRecord = rawDailyTaskReminder as Record<string, unknown>;
+  const timeOfDay =
+    typeof rawRecord.timeOfDay === "string" && TIME_OF_DAY_PATTERN.test(rawRecord.timeOfDay.trim())
+      ? rawRecord.timeOfDay.trim()
+      : DEFAULT_DAILY_TASK_REMINDER_SETTINGS.timeOfDay;
+  return {
+    isEnabled:
+      typeof rawRecord.isEnabled === "boolean"
+        ? rawRecord.isEnabled
+        : DEFAULT_DAILY_TASK_REMINDER_SETTINGS.isEnabled,
+    timeOfDay,
   };
 }
 
@@ -265,6 +309,13 @@ function migrateLoadedTab(rawTab: unknown): DashboardTab | null {
         .filter((entry) => entry.length > 0)
     : [];
 
+  const dailyNoteFolderPath =
+    typeof rawTabRecord.dailyNoteFolderPath === "string"
+      ? normaliseFolderScope(rawTabRecord.dailyNoteFolderPath.trim())
+      : "";
+
+  const workingDayIndices = migrateLoadedWorkingDayIndices(rawTabRecord.workingDayIndices);
+
   const enabledWidgets = Array.isArray(rawTabRecord.enabledWidgets)
     ? rawTabRecord.enabledWidgets.filter(isKnownWidgetIdentifier)
     : [...DEFAULT_ENABLED_WIDGET_IDENTIFIERS];
@@ -297,12 +348,33 @@ function migrateLoadedTab(rawTab: unknown): DashboardTab | null {
   return {
     name: tabName,
     folderScopes,
+    dailyNoteFolderPath,
+    workingDayIndices,
     enabledWidgets,
     collapsedWidgetIdentifiers,
     pinnedProjects,
     widgetSubTabs,
     activeWidgetSubTabName,
   };
+}
+
+function migrateLoadedWorkingDayIndices(rawWorkingDayIndices: unknown): DayOfWeekIndex[] {
+  if (!Array.isArray(rawWorkingDayIndices)) {
+    return [...DEFAULT_WORKING_DAY_INDICES];
+  }
+  const validDayIndices: DayOfWeekIndex[] = [];
+  for (const rawEntry of rawWorkingDayIndices) {
+    if (
+      typeof rawEntry === "number" &&
+      Number.isInteger(rawEntry) &&
+      rawEntry >= 0 &&
+      rawEntry <= 6 &&
+      !validDayIndices.includes(rawEntry)
+    ) {
+      validDayIndices.push(rawEntry);
+    }
+  }
+  return validDayIndices;
 }
 
 function migrateLoadedWidgetSubTab(rawWidgetSubTab: unknown): WidgetSubTab | null {
@@ -423,6 +495,8 @@ function cloneDefaultSettings(): PluginSettings {
     tabs: DEFAULT_PLUGIN_SETTINGS.tabs.map((defaultTab) => ({
       name: defaultTab.name,
       folderScopes: [...defaultTab.folderScopes],
+      dailyNoteFolderPath: defaultTab.dailyNoteFolderPath,
+      workingDayIndices: [...defaultTab.workingDayIndices],
       enabledWidgets: [...defaultTab.enabledWidgets],
       collapsedWidgetIdentifiers: [...defaultTab.collapsedWidgetIdentifiers],
       pinnedProjects: defaultTab.pinnedProjects.map((pinnedProject) => ({
@@ -443,6 +517,7 @@ function cloneDefaultSettings(): PluginSettings {
     })),
     activeTabName: DEFAULT_PLUGIN_SETTINGS.activeTabName,
     workspaceStartup: { ...DEFAULT_PLUGIN_SETTINGS.workspaceStartup },
+    dailyTaskReminder: { ...DEFAULT_PLUGIN_SETTINGS.dailyTaskReminder },
     procrastIdeaFolderMappings: DEFAULT_PLUGIN_SETTINGS.procrastIdeaFolderMappings.map(
       (mapping) => ({
         ideaUuid: mapping.ideaUuid,
@@ -520,6 +595,24 @@ export function computeWidgetSubTabsWithWidgetAssignedTo(
 
 export function normaliseFolderScope(folderScope: FolderPath): FolderPath {
   return folderScope.replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+export function formatDailyNoteBasenameForDate(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+export function buildDailyNotePathForBasename(
+  dailyNoteFolderPath: FolderPath,
+  dailyNoteBasename: string,
+): string {
+  const normalisedFolder = normaliseFolderScope(dailyNoteFolderPath);
+  return normalisedFolder.length === 0
+    ? `${dailyNoteBasename}.md`
+    : `${normalisedFolder}/${dailyNoteBasename}.md`;
+}
+
+export function buildDailyNotePathForDate(dailyNoteFolderPath: FolderPath, date: Date): string {
+  return buildDailyNotePathForBasename(dailyNoteFolderPath, formatDailyNoteBasenameForDate(date));
 }
 
 export function isFilePathWithinFolderScopes(

@@ -7,7 +7,6 @@
   import WidgetSubTabBar from "./WidgetSubTabBar.svelte";
   import RecentFiles from "./widgets/RecentFiles.svelte";
   import DailyTasks from "./widgets/DailyTasks.svelte";
-  import TodayRecap from "./widgets/TodayRecap.svelte";
   import TagFolderStats from "./widgets/TagFolderStats.svelte";
   import GraphInsights from "./widgets/GraphInsights.svelte";
   import PinnedProjects from "./widgets/PinnedProjects.svelte";
@@ -21,8 +20,9 @@
   import nodePath from "path";
 
   import { createRecentlyModifiedFilesStore } from "../data/recents";
-  import { createOpenTasksStore, formatDailyNoteBasenameForDate } from "../data/tasks";
-  import { createTodayRecapStore } from "../data/today";
+  import { createOpenTasksStore } from "../data/tasks";
+  import { rollOverOpenTasksIntoCurrentDailyNote, type RolloverResult } from "../data/rollover";
+  import { createNextWorkdayStore } from "../data/nextWorkday";
   import { createTagFolderStatsStore } from "../data/tags";
   import { createGraphInsightsStore } from "../data/graph";
   import { createDockerContainersStore } from "../data/docker";
@@ -58,6 +58,9 @@
     DEFAULT_ENABLED_WIDGET_IDENTIFIERS,
     DEFAULT_WIDGET_SUB_TAB_NAME,
     buildDefaultWidgetSubTabs,
+    buildDailyNotePathForBasename,
+    buildDailyNotePathForDate,
+    formatDailyNoteBasenameForDate,
     resolveActiveTab,
     resolveActiveWidgetSubTab,
     isWidgetOnWidgetSubTab,
@@ -81,8 +84,16 @@
     30,
     initialActiveTab.folderScopes,
   );
-  const openTasksStore = createOpenTasksStore(obsidianApp, initialActiveTab.folderScopes);
-  const todayRecapStore = createTodayRecapStore(obsidianApp, initialActiveTab.folderScopes);
+  const openTasksStore = createOpenTasksStore(
+    obsidianApp,
+    initialActiveTab.folderScopes,
+    initialActiveTab.dailyNoteFolderPath,
+  );
+  const nextWorkdayStore = createNextWorkdayStore(
+    obsidianApp,
+    initialActiveTab.dailyNoteFolderPath,
+    initialActiveTab.workingDayIndices,
+  );
   const tagFolderStatsStore = createTagFolderStatsStore(obsidianApp, initialActiveTab.folderScopes);
   const graphInsightsStore = createGraphInsightsStore(obsidianApp, initialActiveTab.folderScopes);
   const dockerContainersStore = createDockerContainersStore();
@@ -93,7 +104,7 @@
 
   const recentlyModifiedFilesData = recentlyModifiedFilesStore.store;
   const openTasksData = openTasksStore.store;
-  const todayRecapData = todayRecapStore.store;
+  const nextWorkdayData = nextWorkdayStore.store;
   const tagFolderStatsData = tagFolderStatsStore.store;
   const graphInsightsData = graphInsightsStore.store;
   const dockerSnapshotData = dockerContainersStore.store;
@@ -112,6 +123,19 @@
     ),
   );
   dockerContainersStore.startPolling();
+
+  void rollOverOpenTasksIntoCurrentDailyNote(
+    obsidianApp,
+    initialActiveTab.dailyNoteFolderPath,
+    initialActiveTab.workingDayIndices,
+  ).then((rolloverResult) => {
+    if (rolloverResult.migratedTaskCount > 0) {
+      if (!rolloverResult.destinationIsToday) {
+        new Notice(buildRolloverNoticeMessage(rolloverResult));
+      }
+      refreshAllDashboardData();
+    }
+  });
 
   jiraIssuesStore.setConnectionSettings(initialSettingsSnapshot.jiraConnection);
   jiraIssuesStore.setProjectKeysToQuery(
@@ -172,7 +196,21 @@
     openTasksStore.setFolderScopes(activeFolderScopes);
     tagFolderStatsStore.setFolderScopes(activeFolderScopes);
     graphInsightsStore.setFolderScopes(activeFolderScopes);
-    todayRecapStore.setFolderScopes(activeFolderScopes);
+  }
+
+  $: activeDailyNoteFolderPath = activeTab.dailyNoteFolderPath;
+  let lastAppliedDailyNoteFolderPath: string = initialActiveTab.dailyNoteFolderPath;
+  $: if (activeDailyNoteFolderPath !== lastAppliedDailyNoteFolderPath) {
+    lastAppliedDailyNoteFolderPath = activeDailyNoteFolderPath;
+    openTasksStore.setDailyNoteFolderPath(activeDailyNoteFolderPath);
+    nextWorkdayStore.setDailyNoteFolderPath(activeDailyNoteFolderPath);
+  }
+
+  $: activeWorkingDayIndicesKey = activeTab.workingDayIndices.join(",");
+  let lastAppliedWorkingDayIndicesKey: string = initialActiveTab.workingDayIndices.join(",");
+  $: if (activeWorkingDayIndicesKey !== lastAppliedWorkingDayIndicesKey) {
+    lastAppliedWorkingDayIndicesKey = activeWorkingDayIndicesKey;
+    nextWorkdayStore.setWorkingDayIndices(activeTab.workingDayIndices);
   }
 
   $: activePinnedProjectsConfig = activeTab.pinnedProjects;
@@ -252,7 +290,7 @@
     unsubscribeRefreshSignal();
     recentlyModifiedFilesStore.destroy();
     openTasksStore.destroy();
-    todayRecapStore.destroy();
+    nextWorkdayStore.destroy();
     tagFolderStatsStore.destroy();
     graphInsightsStore.destroy();
     dockerContainersStore.destroy();
@@ -337,7 +375,7 @@
     openTasksStore.setFolderScopes(activeFolderScopes);
     tagFolderStatsStore.setFolderScopes(activeFolderScopes);
     graphInsightsStore.setFolderScopes(activeFolderScopes);
-    todayRecapStore.setFolderScopes(activeFolderScopes);
+    nextWorkdayStore.refresh();
     pinnedProjectsStore.setPinnedProjectsConfig(activePinnedProjectsConfig);
     if (isWidgetEnabledForActiveTab("procrast-ideas")) {
       void procrastIdeasStore.refresh();
@@ -476,21 +514,87 @@
     );
   }
 
-  function handleOpenDailyNote(): void {
-    const todayLabel = $openTasksData.todayDailyNoteLabel.replace(/\s+daily$/, "");
-    const matchedFile = obsidianApp.vault
-      .getMarkdownFiles()
-      .find((file) => file.basename === todayLabel);
-    if (matchedFile) {
-      handleOpenFileInActiveLeaf(matchedFile.path);
+  function resolveDailyNoteFileAtPath(dailyNotePath: string): TFile | null {
+    const resolvedFile = obsidianApp.vault.getAbstractFileByPath(dailyNotePath);
+    return resolvedFile instanceof TFile ? resolvedFile : null;
+  }
+
+  async function ensureDailyNoteParentFolderExists(dailyNotePath: string): Promise<void> {
+    const lastSlashIndex = dailyNotePath.lastIndexOf("/");
+    if (lastSlashIndex <= 0) {
+      return;
+    }
+    const parentFolderPath = dailyNotePath.slice(0, lastSlashIndex);
+    if (obsidianApp.vault.getAbstractFileByPath(parentFolderPath) !== null) {
+      return;
+    }
+    try {
+      await obsidianApp.vault.createFolder(parentFolderPath);
+    } catch {
+      // A concurrent create (or an already-existing folder Obsidian had not yet indexed)
+      // is harmless here — the subsequent file write is what actually matters.
     }
   }
 
-  function handleCreateDailyNote(): void {
-    const obsidianAppWithCommands = obsidianApp as ObsidianApplication & {
-      commands: { executeCommandById: (commandId: string) => boolean };
-    };
-    obsidianAppWithCommands.commands.executeCommandById("daily-notes");
+  function handleOpenDailyNote(): void {
+    const todayDailyNotePath = buildDailyNotePathForDate(
+      activeTab.dailyNoteFolderPath,
+      new Date(),
+    );
+    const dailyNoteFile = resolveDailyNoteFileAtPath(todayDailyNotePath);
+    if (dailyNoteFile) {
+      handleOpenFileInActiveLeaf(dailyNoteFile.path);
+    }
+  }
+
+  async function handleCreateDailyNote(): Promise<void> {
+    const todayDailyNotePath = buildDailyNotePathForDate(
+      activeTab.dailyNoteFolderPath,
+      new Date(),
+    );
+    let dailyNoteFile = resolveDailyNoteFileAtPath(todayDailyNotePath);
+    if (dailyNoteFile === null) {
+      await ensureDailyNoteParentFolderExists(todayDailyNotePath);
+      try {
+        dailyNoteFile = await obsidianApp.vault.create(todayDailyNotePath, "");
+      } catch {
+        new Notice("Could not create today's daily note");
+        return;
+      }
+    }
+    handleOpenFileInActiveLeaf(dailyNoteFile.path);
+    refreshAllDashboardData();
+  }
+
+  async function handleRollOverOpenTasks(): Promise<void> {
+    const rolloverResult = await rollOverOpenTasksIntoCurrentDailyNote(
+      obsidianApp,
+      activeTab.dailyNoteFolderPath,
+      activeTab.workingDayIndices,
+    );
+    if (rolloverResult.migratedTaskCount === 0) {
+      new Notice("No open tasks to roll over");
+      return;
+    }
+    new Notice(buildRolloverNoticeMessage(rolloverResult));
+    refreshAllDashboardData();
+  }
+
+  function buildRolloverNoticeMessage(rolloverResult: RolloverResult): string {
+    const taskNoun = rolloverResult.migratedTaskCount === 1 ? "task" : "tasks";
+    if (rolloverResult.destinationIsToday) {
+      return `Rolled over ${rolloverResult.migratedTaskCount} open ${taskNoun}`;
+    }
+    const destinationLabel = formatRolloverDestinationLabel(
+      rolloverResult.destinationDailyNoteBasename,
+    );
+    return `Rolled over ${rolloverResult.migratedTaskCount} ${taskNoun} to ${destinationLabel} — today isn't a working day`;
+  }
+
+  function formatRolloverDestinationLabel(destinationDailyNoteBasename: string): string {
+    const destinationDate = new Date(`${destinationDailyNoteBasename}T00:00`);
+    const weekdayLabel = destinationDate.toLocaleDateString(undefined, { weekday: "short" });
+    return `${weekdayLabel} ${destinationDailyNoteBasename}`;
   }
 
   async function handleAddDailyTask(taskText: string): Promise<boolean> {
@@ -498,76 +602,19 @@
     if (trimmedTaskText.length === 0) {
       return false;
     }
-
-    const dailyTaskLine = `- [ ] ${trimmedTaskText}`;
-    let dailyNoteFile = findTodayDailyNoteFile();
-    if (dailyNoteFile === null) {
-      handleCreateDailyNote();
-      dailyNoteFile = await waitForTodayDailyNoteFile();
-    }
-    if (dailyNoteFile === null) {
-      dailyNoteFile = await createFallbackDailyNoteWithTask(dailyTaskLine);
-      if (dailyNoteFile === null) {
-        return false;
-      }
-      new Notice("Created daily note and added task");
-      refreshAllDashboardData();
-      return true;
-    }
-
-    try {
-      const currentDailyNoteContents = await obsidianApp.vault.cachedRead(dailyNoteFile);
-      const taskSeparator =
-        currentDailyNoteContents.length === 0 || currentDailyNoteContents.endsWith("\n")
-          ? ""
-          : "\n";
-      await obsidianApp.vault.modify(
-        dailyNoteFile,
-        `${currentDailyNoteContents}${taskSeparator}${dailyTaskLine}\n`,
-      );
+    const todayDailyNotePath = buildDailyNotePathForDate(
+      activeTab.dailyNoteFolderPath,
+      new Date(),
+    );
+    const didAddTask = await appendTaskLineToDailyNoteAtPath(
+      todayDailyNotePath,
+      `- [ ] ${trimmedTaskText}`,
+    );
+    if (didAddTask) {
       new Notice("Added task to daily note");
       refreshAllDashboardData();
-      return true;
-    } catch {
-      new Notice("Could not add task to daily note");
-      return false;
     }
-  }
-
-  function findTodayDailyNoteFile(): TFile | null {
-    const todayLabel = $openTasksData.todayDailyNoteLabel.replace(/\s+daily$/, "");
-    return (
-      obsidianApp.vault
-        .getMarkdownFiles()
-        .find((file) => file.basename === todayLabel) ?? null
-    );
-  }
-
-  async function waitForTodayDailyNoteFile(): Promise<TFile | null> {
-    for (let attemptIndex = 0; attemptIndex < 15; attemptIndex++) {
-      const dailyNoteFile = findTodayDailyNoteFile();
-      if (dailyNoteFile !== null) {
-        return dailyNoteFile;
-      }
-      await delay(100);
-    }
-    return null;
-  }
-
-  async function createFallbackDailyNoteWithTask(taskLine: string): Promise<TFile | null> {
-    const todayLabel = $openTasksData.todayDailyNoteLabel.replace(/\s+daily$/, "");
-    try {
-      return await obsidianApp.vault.create(`${todayLabel}.md`, `${taskLine}\n`);
-    } catch {
-      new Notice("Could not create today's daily note");
-      return null;
-    }
-  }
-
-  function delay(milliseconds: number): Promise<void> {
-    return new Promise((resolve) => {
-      setTimeout(resolve, milliseconds);
-    });
+    return didAddTask;
   }
 
   async function handleAddTaskForNextWorkday(taskText: string): Promise<boolean> {
@@ -575,9 +622,13 @@
     if (trimmedTaskText.length === 0) {
       return false;
     }
-    const nextWorkdayBasename = get(todayRecapData).nextWorkdayBasename;
-    const didAddTask = await appendTaskLineToDailyNoteByBasename(
+    const nextWorkdayBasename = get(nextWorkdayData).nextWorkdayBasename;
+    const nextWorkdayNotePath = buildDailyNotePathForBasename(
+      activeTab.dailyNoteFolderPath,
       nextWorkdayBasename,
+    );
+    const didAddTask = await appendTaskLineToDailyNoteAtPath(
+      nextWorkdayNotePath,
       `- [ ] ${trimmedTaskText}`,
     );
     if (didAddTask) {
@@ -588,26 +639,27 @@
   }
 
   function handleOpenNextWorkdayNote(): void {
-    const nextWorkdayBasename = get(todayRecapData).nextWorkdayBasename;
-    const matchedFile = obsidianApp.vault
-      .getMarkdownFiles()
-      .find((file) => file.basename === nextWorkdayBasename);
-    if (matchedFile) {
-      handleOpenFileInActiveLeaf(matchedFile.path);
+    const nextWorkdayBasename = get(nextWorkdayData).nextWorkdayBasename;
+    const nextWorkdayNotePath = buildDailyNotePathForBasename(
+      activeTab.dailyNoteFolderPath,
+      nextWorkdayBasename,
+    );
+    const dailyNoteFile = resolveDailyNoteFileAtPath(nextWorkdayNotePath);
+    if (dailyNoteFile) {
+      handleOpenFileInActiveLeaf(dailyNoteFile.path);
     }
   }
 
-  async function appendTaskLineToDailyNoteByBasename(
-    dailyNoteBasename: string,
+  async function appendTaskLineToDailyNoteAtPath(
+    dailyNotePath: string,
     taskLine: string,
   ): Promise<boolean> {
-    const existingDailyNoteFile = obsidianApp.vault
-      .getMarkdownFiles()
-      .find((file) => file.basename === dailyNoteBasename) ?? null;
+    const existingDailyNoteFile = resolveDailyNoteFileAtPath(dailyNotePath);
 
     if (existingDailyNoteFile === null) {
+      await ensureDailyNoteParentFolderExists(dailyNotePath);
       try {
-        await obsidianApp.vault.create(`${dailyNoteBasename}.md`, `${taskLine}\n`);
+        await obsidianApp.vault.create(dailyNotePath, `${taskLine}\n`);
         return true;
       } catch {
         new Notice("Could not create the daily note");
@@ -1191,22 +1243,16 @@
           tasksCreatedTodayCount={$openTasksData.tasksCreatedTodayCount}
           todayDailyNoteLabel={$openTasksData.todayDailyNoteLabel}
           todayDailyNoteExists={$openTasksData.todayDailyNoteExists}
+          todayIsWorkingDay={$nextWorkdayData.todayIsWorkingDay}
+          nextWorkdayHeadingLabel={$nextWorkdayData.nextWorkdayHeadingLabel}
+          nextWorkdayNoteExists={$nextWorkdayData.nextWorkdayNoteExists}
+          nextWorkdayQueuedTasks={$nextWorkdayData.nextWorkdayQueuedTasks}
           viewState="data"
           onSelectTask={handleSelectTask}
           onOpenDailyNote={handleOpenDailyNote}
           onCreateDailyNote={handleCreateDailyNote}
           onAddDailyTask={handleAddDailyTask}
-        />
-      </div>
-    {/if}
-
-    {#if visibleWidgetIdentifiersOnActiveSubTab.has("today-recap")}
-      <div class="widget-cell">
-        <TodayRecap
-          snapshot={$todayRecapData}
-          isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("today-recap")}
-          onToggleCollapsed={() => handleToggleWidgetCollapsed("today-recap")}
-          onOpenFile={handleOpenFileInActiveLeaf}
+          onRollOverOpenTasks={handleRollOverOpenTasks}
           onAddNextWorkdayTask={handleAddTaskForNextWorkday}
           onOpenNextWorkdayNote={handleOpenNextWorkdayNote}
         />

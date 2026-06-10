@@ -6,6 +6,7 @@ import { VaultDashboardSettingsTab } from "./ui/SettingsTab";
 import { WorkspaceStartupPromptModal } from "./ui/WorkspaceStartupPromptModal";
 import { registerDashboardCommands, refreshDynamicTabCommands } from "./commands";
 import { openClaudeCodeTerminalView } from "./data/claudeTerminal";
+import { rollOverOpenTasksIntoCurrentDailyNote } from "./data/rollover";
 import {
   DEFAULT_PLUGIN_SETTINGS,
   findTabByName,
@@ -18,6 +19,8 @@ export default class VaultDashboardPlugin extends Plugin {
   public readonly settingsStore: Writable<PluginSettings> = writable(DEFAULT_PLUGIN_SETTINGS);
   public readonly refreshSignalStore: Writable<number> = writable(0);
   public readonly registeredTabCommandIds: Set<string> = new Set();
+
+  private dailyTaskReminderTimeoutId: number | null = null;
 
   async onload(): Promise<void> {
     const rawLoadedSettings = await this.loadData();
@@ -38,14 +41,32 @@ export default class VaultDashboardPlugin extends Plugin {
     this.addSettingTab(new VaultDashboardSettingsTab(this.app, this));
 
     this.app.workspace.onLayoutReady(() => {
+      void this.rollOverOpenTasksForAllTabs();
       if (this.currentSettings.workspaceStartup.runDashboardWorkspaceLayoutOnStartup) {
         void this.setUpDashboardWorkspaceLayout();
       }
     });
+
+    this.scheduleDailyTaskReminder();
+  }
+
+  async rollOverOpenTasksForAllTabs(): Promise<void> {
+    for (const dashboardTab of this.currentSettings.tabs) {
+      try {
+        await rollOverOpenTasksIntoCurrentDailyNote(
+          this.app,
+          dashboardTab.dailyNoteFolderPath,
+          dashboardTab.workingDayIndices,
+        );
+      } catch {
+        // One tab's daily-note folder being unwritable must not block the others.
+      }
+    }
   }
 
   async onunload(): Promise<void> {
     this.app.workspace.detachLeavesOfType(VAULT_DASHBOARD_VIEW_TYPE);
+    this.clearDailyTaskReminder();
   }
 
   async replaceSettings(nextSettings: PluginSettings): Promise<void> {
@@ -53,6 +74,48 @@ export default class VaultDashboardPlugin extends Plugin {
     this.settingsStore.set(nextSettings);
     await this.saveData(nextSettings);
     refreshDynamicTabCommands(this);
+    this.scheduleDailyTaskReminder();
+  }
+
+  private clearDailyTaskReminder(): void {
+    if (this.dailyTaskReminderTimeoutId !== null) {
+      window.clearTimeout(this.dailyTaskReminderTimeoutId);
+      this.dailyTaskReminderTimeoutId = null;
+    }
+  }
+
+  private scheduleDailyTaskReminder(): void {
+    this.clearDailyTaskReminder();
+
+    const reminder = this.currentSettings.dailyTaskReminder;
+    if (!reminder.isEnabled) {
+      return;
+    }
+
+    const millisecondsUntilReminder = computeMillisecondsUntilNextReminder(
+      reminder.timeOfDay,
+      new Date(),
+    );
+    if (millisecondsUntilReminder === null) {
+      return;
+    }
+
+    this.dailyTaskReminderTimeoutId = window.setTimeout(() => {
+      this.dailyTaskReminderTimeoutId = null;
+      this.fireDailyTaskReminderIfTodayIsAWorkingDay();
+      this.scheduleDailyTaskReminder();
+    }, millisecondsUntilReminder);
+  }
+
+  private fireDailyTaskReminderIfTodayIsAWorkingDay(): void {
+    const todayDayOfWeekIndex = new Date().getDay();
+    const todayIsAWorkingDayForAnyTab = this.currentSettings.tabs.some((tab) =>
+      tab.workingDayIndices.includes(todayDayOfWeekIndex),
+    );
+    if (!todayIsAWorkingDayForAnyTab) {
+      return;
+    }
+    new Notice("Fill in tomorrow's tasks");
   }
 
   requestDashboardDataRefresh(): void {
@@ -126,4 +189,20 @@ export default class VaultDashboardPlugin extends Plugin {
       },
     }).open();
   }
+}
+
+function computeMillisecondsUntilNextReminder(timeOfDay: string, now: Date): number | null {
+  const timeMatch = timeOfDay.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  if (timeMatch === null) {
+    return null;
+  }
+  const reminderHour = Number(timeMatch[1]);
+  const reminderMinute = Number(timeMatch[2]);
+
+  const nextReminderMoment = new Date(now);
+  nextReminderMoment.setHours(reminderHour, reminderMinute, 0, 0);
+  if (nextReminderMoment.getTime() <= now.getTime()) {
+    nextReminderMoment.setDate(nextReminderMoment.getDate() + 1);
+  }
+  return nextReminderMoment.getTime() - now.getTime();
 }

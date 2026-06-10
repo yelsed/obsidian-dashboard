@@ -4,11 +4,14 @@ import {
   ALL_WIDGET_IDENTIFIERS,
   DEFAULT_ENABLED_WIDGET_IDENTIFIERS,
   DEFAULT_WIDGET_SUB_TAB_NAME,
+  DEFAULT_WORKING_DAY_INDICES,
   WIDGET_DISPLAY_LABEL_BY_IDENTIFIER,
   buildDefaultWidgetSubTabs,
   computeWidgetSubTabsWithWidgetAssignedTo,
+  normaliseFolderScope,
   resolveEffectiveWidgetSubTabName,
   type DashboardTab,
+  type DayOfWeekIndex,
   type PluginSettings,
   type WidgetIdentifier,
 } from "../settings";
@@ -46,6 +49,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
     }
 
     this.renderAddTabButton(containerEl);
+    this.renderDailyTaskReminderSection(containerEl);
     this.renderJiraConnectionSection(containerEl);
   }
 
@@ -252,6 +256,38 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
           await this.plugin.replaceSettings(updatedSettings);
         });
       });
+
+    tabSectionContainer.createEl("h4", { text: "Daily notes" });
+    tabSectionContainer.createEl("p", {
+      text: "Keep this tab's daily note and 'next workday' planning separate from the other tabs.",
+      cls: "setting-item-description",
+    });
+
+    new Setting(tabSectionContainer)
+      .setName("Daily note folder")
+      .setDesc(
+        "Folder this tab's daily notes live in, so each tab keeps its own daily note. " +
+          "Leave empty to use the vault root.",
+      )
+      .addText((textInput) => {
+        textInput.setPlaceholder("Work/Daily");
+        textInput.setValue(dashboardTab.dailyNoteFolderPath);
+        textInput.inputEl.addEventListener("blur", async () => {
+          const normalisedFolderPath = normaliseFolderScope(textInput.getValue().trim());
+          const updatedSettings = cloneSettings(this.plugin.currentSettings);
+          const editedTab = updatedSettings.tabs.find(
+            (candidateTab) => candidateTab.name === dashboardTab.name,
+          );
+          if (!editedTab) {
+            return;
+          }
+          editedTab.dailyNoteFolderPath = normalisedFolderPath;
+          textInput.setValue(normalisedFolderPath);
+          await this.plugin.replaceSettings(updatedSettings);
+        });
+      });
+
+    this.renderWorkingDaysForTab(tabSectionContainer, dashboardTab);
 
     tabSectionContainer.createEl("h4", { text: "Sub-tabs" });
     tabSectionContainer.createEl("p", {
@@ -809,6 +845,87 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
       });
   }
 
+  private renderWorkingDaysForTab(
+    parentElement: HTMLElement,
+    dashboardTab: DashboardTab,
+  ): void {
+    const workingDaysSetting = new Setting(parentElement)
+      .setName("Working days")
+      .setDesc(
+        "Days you work in this tab. 'Next workday' skips the unchecked days so tasks " +
+          "queued before a day off land on the day you are actually back.",
+      );
+
+    for (const dayOption of ORDERED_DAY_OF_WEEK_OPTIONS) {
+      workingDaysSetting.addButton((buttonControl) => {
+        buttonControl.setButtonText(dayOption.shortLabel);
+        const isWorkingDay = dashboardTab.workingDayIndices.includes(dayOption.dayIndex);
+        if (isWorkingDay) {
+          buttonControl.setCta();
+        }
+        buttonControl.onClick(async () => {
+          const updatedSettings = cloneSettings(this.plugin.currentSettings);
+          const editedTab = updatedSettings.tabs.find(
+            (candidateTab) => candidateTab.name === dashboardTab.name,
+          );
+          if (!editedTab) {
+            return;
+          }
+          editedTab.workingDayIndices = toggleDayOfWeekMembership(
+            editedTab.workingDayIndices,
+            dayOption.dayIndex,
+          );
+          await this.plugin.replaceSettings(updatedSettings);
+          this.display();
+        });
+      });
+    }
+  }
+
+  private renderDailyTaskReminderSection(parentElement: HTMLElement): void {
+    const reminderSectionContainer = parentElement.createDiv({
+      cls: "vault-dashboard-settings-tab-section",
+    });
+
+    reminderSectionContainer.createEl("h3", { text: "Daily task reminder" });
+    reminderSectionContainer.createEl("p", {
+      text:
+        "Pops a reminder to fill in tomorrow's tasks at the set time. " +
+        "Only fires on a day that is a working day for at least one tab.",
+      cls: "setting-item-description",
+    });
+
+    new Setting(reminderSectionContainer)
+      .setName("Enable reminder")
+      .addToggle((toggleControl) => {
+        toggleControl.setValue(this.plugin.currentSettings.dailyTaskReminder.isEnabled);
+        toggleControl.onChange(async (isEnabled) => {
+          const updatedSettings = cloneSettings(this.plugin.currentSettings);
+          updatedSettings.dailyTaskReminder.isEnabled = isEnabled;
+          await this.plugin.replaceSettings(updatedSettings);
+        });
+      });
+
+    new Setting(reminderSectionContainer)
+      .setName("Reminder time")
+      .setDesc("24-hour time, e.g. 15:45.")
+      .addText((textInput) => {
+        textInput.setPlaceholder("15:45");
+        textInput.setValue(this.plugin.currentSettings.dailyTaskReminder.timeOfDay);
+        textInput.inputEl.addEventListener("blur", async () => {
+          const enteredTime = textInput.getValue().trim();
+          if (!TIME_OF_DAY_PATTERN.test(enteredTime)) {
+            new Notice("Enter the reminder time as HH:MM, e.g. 15:45");
+            textInput.setValue(this.plugin.currentSettings.dailyTaskReminder.timeOfDay);
+            return;
+          }
+          const updatedSettings = cloneSettings(this.plugin.currentSettings);
+          updatedSettings.dailyTaskReminder.timeOfDay = enteredTime;
+          await this.plugin.replaceSettings(updatedSettings);
+        });
+      });
+  }
+
   private renderAddTabButton(parentElement: HTMLElement): void {
     new Setting(parentElement)
       .setName("Add tab")
@@ -821,6 +938,8 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
           updatedSettings.tabs.push({
             name: newTabName,
             folderScopes: [],
+            dailyNoteFolderPath: "",
+            workingDayIndices: [...DEFAULT_WORKING_DAY_INDICES],
             enabledWidgets: [...DEFAULT_ENABLED_WIDGET_IDENTIFIERS],
             collapsedWidgetIdentifiers: [],
             pinnedProjects: [],
@@ -832,6 +951,34 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
         });
       });
   }
+}
+
+const TIME_OF_DAY_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+type DayOfWeekOption = {
+  dayIndex: DayOfWeekIndex;
+  shortLabel: string;
+};
+
+// Monday-first display order; dayIndex is the JavaScript Date.getDay() value stored in settings.
+const ORDERED_DAY_OF_WEEK_OPTIONS: readonly DayOfWeekOption[] = [
+  { dayIndex: 1, shortLabel: "Mon" },
+  { dayIndex: 2, shortLabel: "Tue" },
+  { dayIndex: 3, shortLabel: "Wed" },
+  { dayIndex: 4, shortLabel: "Thu" },
+  { dayIndex: 5, shortLabel: "Fri" },
+  { dayIndex: 6, shortLabel: "Sat" },
+  { dayIndex: 0, shortLabel: "Sun" },
+] as const;
+
+function toggleDayOfWeekMembership(
+  workingDayIndices: DayOfWeekIndex[],
+  dayIndexToToggle: DayOfWeekIndex,
+): DayOfWeekIndex[] {
+  if (workingDayIndices.includes(dayIndexToToggle)) {
+    return workingDayIndices.filter((dayIndex) => dayIndex !== dayIndexToToggle);
+  }
+  return [...workingDayIndices, dayIndexToToggle];
 }
 
 function announceJiraConnectionTestResult(testResult: JiraConnectionTestResult): void {
@@ -892,6 +1039,8 @@ function cloneSettings(settings: PluginSettings): PluginSettings {
     tabs: settings.tabs.map((dashboardTab) => ({
       name: dashboardTab.name,
       folderScopes: [...dashboardTab.folderScopes],
+      dailyNoteFolderPath: dashboardTab.dailyNoteFolderPath,
+      workingDayIndices: [...dashboardTab.workingDayIndices],
       enabledWidgets: [...dashboardTab.enabledWidgets],
       collapsedWidgetIdentifiers: [...dashboardTab.collapsedWidgetIdentifiers],
       pinnedProjects: dashboardTab.pinnedProjects.map((pinnedProject) => ({
@@ -911,6 +1060,7 @@ function cloneSettings(settings: PluginSettings): PluginSettings {
       activeWidgetSubTabName: dashboardTab.activeWidgetSubTabName,
     })),
     workspaceStartup: { ...settings.workspaceStartup },
+    dailyTaskReminder: { ...settings.dailyTaskReminder },
     procrastIdeaFolderMappings: settings.procrastIdeaFolderMappings.map((mapping) => ({
       ideaUuid: mapping.ideaUuid,
       targetFolderPath: mapping.targetFolderPath,
