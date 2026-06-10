@@ -99,6 +99,7 @@
   };
 
   type PinnedProject = {
+    id: string;
     folderPath: string;
     displayName: string;
     dockerAvailability: DockerAvailability;
@@ -135,6 +136,7 @@
   export let onToggleCollapsed: () => void = () => {};
   export let pinnedProjects: PinnedProject[] = [
     {
+      id: "sample-fivespark",
       folderPath: "/fivespark",
       displayName: "Fivespark",
       dockerAvailability: "available",
@@ -172,6 +174,7 @@
       ],
     },
     {
+      id: "sample-yelsed",
       folderPath: "/yelsed",
       displayName: "Yelsed",
       dockerAvailability: "available",
@@ -194,6 +197,7 @@
       jiraIssuesForProject: [],
     },
     {
+      id: "sample-procrast-cli",
       folderPath: "/procrast-cli",
       displayName: "Procrast CLI",
       dockerAvailability: "available",
@@ -222,6 +226,7 @@
       ],
     },
     {
+      id: "sample-learning",
       folderPath: "/learning",
       displayName: "Learning",
       dockerAvailability: "not-installed",
@@ -244,57 +249,57 @@
       jiraIssuesForProject: [],
     },
   ];
-  export let onToggleProjectExpansion: (folderPath: string) => void = () => {};
-  export let onOpenChildFile: (folderPath: string, relativeFilePath: string) => void = () => {};
+  export let onToggleProjectExpansion: (pinnedProjectId: string) => void = () => {};
+  export let onOpenChildFile: (pinnedProjectId: string, relativeFilePath: string) => void = () => {};
   export let shellCommandRunsByKey: Record<string, ShellCommandRunSnapshot> = {};
   export let onRunShellCommand: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     shellCommandIndex: number,
     commandLine: string,
   ) => void = () => {};
   export let onKillShellCommand: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     shellCommandIndex: number,
   ) => void = () => {};
   export let onClearShellCommandOutput: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     shellCommandIndex: number,
   ) => void = () => {};
   export let onCopyClaudeResumeCommand: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     sessionId: string,
   ) => void = () => {};
   export let onRelaunchClaudeSession: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     sessionId: string,
   ) => void = () => {};
   export let onStartSessionFromProjectGoals: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
   ) => void = () => {};
   export let onCreateProjectGoalsFile: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
   ) => void = () => {};
   export let onOpenProjectGoalsFile: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
   ) => void = () => {};
   export let onCollectOpenTasksIntoProjectGoals: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
   ) => void = () => {};
   export let onOpenJiraIssueInBrowser: (issueBrowserUrl: string) => void = () => {};
   export let onStartClaudeSessionFromJiraIssue: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     issueKey: string,
   ) => void = () => {};
   export let onShowAllJiraIssues: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     jiraProjectKey: string,
   ) => void = () => {};
 
   function buildShellCommandRunKey(
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     shellCommandIndex: number,
   ): string {
-    return `${pinnedProjectFolderPath}::${shellCommandIndex}`;
+    return `${pinnedProjectId}::${shellCommandIndex}`;
   }
 
   function describeShellCommandStatusLabel(snapshot: ShellCommandRunSnapshot | undefined): string {
@@ -375,13 +380,13 @@
       <p class="widget-empty">No pinned projects yet. Add one in Settings → Vault Dashboard.</p>
     {:else}
       <ul class="project-tile-grid">
-        {#each pinnedProjects as project (project.folderPath)}
+        {#each pinnedProjects as project (project.id)}
           <li class="project-tile">
             <button
               type="button"
               class="project-header"
               aria-expanded={project.isExpanded}
-              on:click={() => onToggleProjectExpansion(project.folderPath)}
+              on:click={() => onToggleProjectExpansion(project.id)}
             >
               <span class="project-header-top">
                 <span class="project-display-name">{project.displayName || project.folderPath}</span>
@@ -433,7 +438,7 @@
                       type="button"
                       class="project-goals-button"
                       title="Open GOALS.md for this project"
-                      on:click={() => onOpenProjectGoalsFile(project.folderPath)}
+                      on:click={() => onOpenProjectGoalsFile(project.id)}
                     >
                       <span class="project-goals-glyph" aria-hidden="true">◇</span>
                       open GOALS.md
@@ -442,7 +447,7 @@
                       type="button"
                       class="project-goals-button"
                       title="Start a Claude Code session seeded with GOALS.md"
-                      on:click={() => onStartSessionFromProjectGoals(project.folderPath)}
+                      on:click={() => onStartSessionFromProjectGoals(project.id)}
                     >
                       <span class="project-goals-glyph" aria-hidden="true">◆</span>
                       plan from goals
@@ -452,7 +457,7 @@
                       type="button"
                       class="project-goals-button"
                       title="Create GOALS.md for this project"
-                      on:click={() => onCreateProjectGoalsFile(project.folderPath)}
+                      on:click={() => onCreateProjectGoalsFile(project.id)}
                     >
                       <span class="project-goals-glyph" aria-hidden="true">＋</span>
                       create GOALS.md
@@ -464,7 +469,7 @@
                       type="button"
                       class="project-goals-button"
                       title="Collect this project's open tasks into GOALS.md"
-                      on:click={() => onCollectOpenTasksIntoProjectGoals(project.folderPath)}
+                      on:click={() => onCollectOpenTasksIntoProjectGoals(project.id)}
                     >
                       <span class="project-goals-glyph" aria-hidden="true">↓</span>
                       collect tasks
@@ -482,7 +487,7 @@
                         <button
                           type="button"
                           class="detail-file-button project-task-file"
-                          on:click={() => onOpenChildFile(project.folderPath, openTask.relativeFilePath)}
+                          on:click={() => onOpenChildFile(project.id, openTask.relativeFilePath)}
                         >
                           {openTask.relativeFilePath}
                         </button>
@@ -519,7 +524,7 @@
                           type="button"
                           class="project-jira-fix-button"
                           title="Open Claude Code in this folder with the full {jiraIssue.issueKey} ticket"
-                          on:click={() => onStartClaudeSessionFromJiraIssue(project.folderPath, jiraIssue.issueKey)}
+                          on:click={() => onStartClaudeSessionFromJiraIssue(project.id, jiraIssue.issueKey)}
                         >
                           <span class="project-jira-fix-glyph" aria-hidden="true">▶</span>
                           fix in claude
@@ -530,7 +535,7 @@
                       <button
                         type="button"
                         class="detail-see-more-button"
-                        on:click={() => onShowAllJiraIssues(project.folderPath, project.jiraProjectKey)}
+                        on:click={() => onShowAllJiraIssues(project.id, project.jiraProjectKey)}
                       >
                         … see all {project.jiraOpenIssueCount} issues (search + sort)
                       </button>
@@ -566,7 +571,7 @@
                         <button
                           type="button"
                           class="detail-file-button"
-                          on:click={() => onOpenChildFile(project.folderPath, childFile.relativeFilePath)}
+                          on:click={() => onOpenChildFile(project.id, childFile.relativeFilePath)}
                         >
                           {childFile.relativeFilePath}
                         </button>
@@ -589,8 +594,8 @@
                         <button
                           type="button"
                           class="claude-session-button"
-                          title="Copy `claude --resume {claudeSession.sessionId}` to clipboard"
-                          on:click={() => onCopyClaudeResumeCommand(project.folderPath, claudeSession.sessionId)}
+                          title="Copy claude --resume {claudeSession.sessionId} to clipboard"
+                          on:click={() => onCopyClaudeResumeCommand(project.id, claudeSession.sessionId)}
                         >
                           <span class="claude-session-row-top">
                             <span class="claude-session-slug">{resolveSessionHeadline(claudeSession)}</span>
@@ -615,7 +620,7 @@
                           type="button"
                           class="claude-session-relaunch-button"
                           title="Resume this session in the Obsidian Claude Code terminal"
-                          on:click={() => onRelaunchClaudeSession(project.folderPath, claudeSession.sessionId)}
+                          on:click={() => onRelaunchClaudeSession(project.id, claudeSession.sessionId)}
                         >
                           <span class="claude-session-relaunch-glyph" aria-hidden="true">▶</span>
                           resume
@@ -629,7 +634,7 @@
                   <h3 class="detail-heading">Commands</h3>
                   <ul class="shell-command-list">
                     {#each project.storedShellCommands as storedShellCommand (storedShellCommand.shellCommandIndex)}
-                      {@const shellCommandRunKey = buildShellCommandRunKey(project.folderPath, storedShellCommand.shellCommandIndex)}
+                      {@const shellCommandRunKey = buildShellCommandRunKey(project.id, storedShellCommand.shellCommandIndex)}
                       {@const shellCommandRunSnapshot = shellCommandRunsByKey[shellCommandRunKey]}
                       {@const isShellCommandRunning = shellCommandRunSnapshot?.status === "running"}
                       <li class="shell-command-row">
@@ -639,7 +644,7 @@
                             class="shell-command-run-button"
                             data-status={shellCommandRunSnapshot?.status ?? "idle"}
                             disabled={isShellCommandRunning}
-                            on:click={() => onRunShellCommand(project.folderPath, storedShellCommand.shellCommandIndex, storedShellCommand.commandLine)}
+                            on:click={() => onRunShellCommand(project.id, storedShellCommand.shellCommandIndex, storedShellCommand.commandLine)}
                             title={storedShellCommand.commandLine}
                           >
                             <span class="shell-command-prompt" aria-hidden="true">$</span>
@@ -652,7 +657,7 @@
                             <button
                               type="button"
                               class="shell-command-secondary-button"
-                              on:click={() => onKillShellCommand(project.folderPath, storedShellCommand.shellCommandIndex)}
+                              on:click={() => onKillShellCommand(project.id, storedShellCommand.shellCommandIndex)}
                             >
                               kill
                             </button>
@@ -660,7 +665,7 @@
                             <button
                               type="button"
                               class="shell-command-secondary-button"
-                              on:click={() => onClearShellCommandOutput(project.folderPath, storedShellCommand.shellCommandIndex)}
+                              on:click={() => onClearShellCommandOutput(project.id, storedShellCommand.shellCommandIndex)}
                             >
                               clear
                             </button>

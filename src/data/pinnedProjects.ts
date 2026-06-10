@@ -5,6 +5,7 @@ import { formatRelativeModifiedTime } from "./format";
 import { OPEN_TASK_LINE_PATTERN } from "./tasks";
 import type {
   PinnedProject as PinnedProjectConfig,
+  PinnedProjectId,
   ProcrastIdeaFolderMapping,
 } from "../settings";
 import type { DockerContainerSummary, DockerSnapshot } from "./docker";
@@ -47,6 +48,7 @@ export type ProcrastOriginForWidget = {
 };
 
 export type PinnedProjectForWidget = {
+  id: PinnedProjectId;
   folderPath: string;
   displayName: string;
   dockerAvailability: "available" | "not-installed";
@@ -77,7 +79,7 @@ export type PinnedProjectsStore = {
   setPinnedProjectsConfig: (pinnedProjectsConfig: PinnedProjectConfig[]) => void;
   setDockerSnapshot: (dockerSnapshot: DockerSnapshot) => void;
   setJiraSnapshot: (jiraSnapshot: JiraSnapshot) => void;
-  setExpandedFolderPaths: (expandedFolderPaths: Set<string>) => void;
+  setExpandedProjectIds: (expandedProjectIds: Set<PinnedProjectId>) => void;
   setProcrastIdeaFolderMappings: (
     procrastIdeaFolderMappings: ProcrastIdeaFolderMapping[],
   ) => void;
@@ -132,7 +134,7 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
     lastErrorMessage: null,
     lastRefreshedAtEpochMilliseconds: null,
   };
-  let currentExpandedFolderPaths: Set<string> = new Set();
+  let currentExpandedProjectIds: Set<PinnedProjectId> = new Set();
   let currentProcrastIdeaFolderMappings: ProcrastIdeaFolderMapping[] = [];
   const filesystemSnapshotByAbsoluteFolderPath = new Map<string, CachedProjectFilesystemSnapshot>();
   const recentClaudeSessionsByAbsoluteFolderPath = new Map<string, ClaudeSessionSummary[]>();
@@ -222,6 +224,7 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
     const jiraOpenIssueCount = jiraIssuesForProject.length;
 
     return {
+      id: projectConfig.id,
       folderPath: projectConfig.folderPath,
       displayName: resolveDisplayNameFor(projectConfig),
       dockerAvailability: dockerAvailabilityForWidget,
@@ -242,7 +245,7 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
       goalsFileExists: cachedFilesystemSnapshot.goalsFileExists,
       openTasks: displayedOpenTasks,
       openTaskOverflowCount,
-      isExpanded: currentExpandedFolderPaths.has(projectConfig.folderPath),
+      isExpanded: currentExpandedProjectIds.has(projectConfig.id),
       procrastOrigin,
       jiraProjectKey,
       jiraAvailability: currentJiraSnapshot.jiraAvailability,
@@ -312,8 +315,8 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
     publishCurrentWidgetSnapshot();
   }
 
-  function setExpandedFolderPaths(expandedFolderPaths: Set<string>): void {
-    currentExpandedFolderPaths = expandedFolderPaths;
+  function setExpandedProjectIds(expandedProjectIds: Set<PinnedProjectId>): void {
+    currentExpandedProjectIds = expandedProjectIds;
     publishCurrentWidgetSnapshot();
   }
 
@@ -340,7 +343,7 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
     setPinnedProjectsConfig,
     setDockerSnapshot,
     setJiraSnapshot,
-    setExpandedFolderPaths,
+    setExpandedProjectIds,
     setProcrastIdeaFolderMappings,
     destroy,
   };

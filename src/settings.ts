@@ -1,5 +1,16 @@
 export type FolderPath = string;
 
+export type PinnedProjectId = string;
+export type DashboardTabId = string;
+export type WidgetSubTabId = string;
+
+// Stable identity that survives renames and folder-path edits. Tabs, sub-tabs, and pinned
+// projects are matched on this id everywhere — never on their display name or folder path —
+// so two of them that happen to share a name or basename never drive each other.
+export function generateStableId(): string {
+  return crypto.randomUUID();
+}
+
 export type JiraSiteDomain = string;
 export type JiraAccountEmail = string;
 export type JiraApiToken = string;
@@ -48,6 +59,7 @@ export const WIDGET_DISPLAY_LABEL_BY_IDENTIFIER: Record<WidgetIdentifier, string
 };
 
 export type PinnedProject = {
+  id: PinnedProjectId;
   folderPath: FolderPath;
   displayName: string;
   manuallyAssignedContainerNames: string[];
@@ -65,7 +77,7 @@ export type JiraConnectionSettings = {
 export type ProcrastIdeaFolderMapping = {
   ideaUuid: string;
   targetFolderPath: FolderPath;
-  tabName: string;
+  tabId: DashboardTabId;
   createdAt: string;
   ideaTitle: string;
 };
@@ -73,6 +85,7 @@ export type ProcrastIdeaFolderMapping = {
 export type WidgetSubTabName = string;
 
 export type WidgetSubTab = {
+  id: WidgetSubTabId;
   name: WidgetSubTabName;
   widgetIdentifiers: WidgetIdentifier[];
 };
@@ -82,6 +95,7 @@ export const DEFAULT_WIDGET_SUB_TAB_NAME = "Main";
 export function buildDefaultWidgetSubTabs(): WidgetSubTab[] {
   return [
     {
+      id: generateStableId(),
       name: DEFAULT_WIDGET_SUB_TAB_NAME,
       widgetIdentifiers: [...ALL_WIDGET_IDENTIFIERS],
     },
@@ -94,6 +108,7 @@ export type DayOfWeekIndex = number;
 export const DEFAULT_WORKING_DAY_INDICES: readonly DayOfWeekIndex[] = [1, 2, 3, 4, 5] as const;
 
 export type DashboardTab = {
+  id: DashboardTabId;
   name: string;
   folderScopes: FolderPath[];
   dailyNoteFolderPath: FolderPath;
@@ -102,7 +117,7 @@ export type DashboardTab = {
   collapsedWidgetIdentifiers: WidgetIdentifier[];
   pinnedProjects: PinnedProject[];
   widgetSubTabs: WidgetSubTab[];
-  activeWidgetSubTabName: WidgetSubTabName;
+  activeWidgetSubTabId: WidgetSubTabId;
 };
 
 export type WorkspaceStartupSettings = {
@@ -124,7 +139,7 @@ const TIME_OF_DAY_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export type PluginSettings = {
   tabs: DashboardTab[];
-  activeTabName: string;
+  activeTabId: DashboardTabId;
   workspaceStartup: WorkspaceStartupSettings;
   dailyTaskReminder: DailyTaskReminderSettings;
   procrastIdeaFolderMappings: ProcrastIdeaFolderMapping[];
@@ -151,41 +166,40 @@ export function isJiraConnectionConfigured(connection: JiraConnectionSettings): 
   );
 }
 
-export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
-  tabs: [
-    {
-      name: "Work",
-      folderScopes: [],
-      dailyNoteFolderPath: "",
-      workingDayIndices: [...DEFAULT_WORKING_DAY_INDICES],
-      enabledWidgets: [...DEFAULT_ENABLED_WIDGET_IDENTIFIERS],
-      collapsedWidgetIdentifiers: [],
-      pinnedProjects: [],
-      widgetSubTabs: buildDefaultWidgetSubTabs(),
-      activeWidgetSubTabName: DEFAULT_WIDGET_SUB_TAB_NAME,
-    },
-    {
-      name: "Private",
-      folderScopes: [],
-      dailyNoteFolderPath: "",
-      workingDayIndices: [...DEFAULT_WORKING_DAY_INDICES],
-      enabledWidgets: [...DEFAULT_ENABLED_WIDGET_IDENTIFIERS],
-      collapsedWidgetIdentifiers: [],
-      pinnedProjects: [],
-      widgetSubTabs: buildDefaultWidgetSubTabs(),
-      activeWidgetSubTabName: DEFAULT_WIDGET_SUB_TAB_NAME,
-    },
-  ],
-  activeTabName: "Work",
-  workspaceStartup: { ...DEFAULT_WORKSPACE_STARTUP_SETTINGS },
-  dailyTaskReminder: { ...DEFAULT_DAILY_TASK_REMINDER_SETTINGS },
-  procrastIdeaFolderMappings: [],
-  jiraConnection: { ...DEFAULT_JIRA_CONNECTION_SETTINGS },
-};
+export function buildDefaultDashboardTab(name: string): DashboardTab {
+  const widgetSubTabs = buildDefaultWidgetSubTabs();
+  return {
+    id: generateStableId(),
+    name,
+    folderScopes: [],
+    dailyNoteFolderPath: "",
+    workingDayIndices: [...DEFAULT_WORKING_DAY_INDICES],
+    enabledWidgets: [...DEFAULT_ENABLED_WIDGET_IDENTIFIERS],
+    collapsedWidgetIdentifiers: [],
+    pinnedProjects: [],
+    widgetSubTabs,
+    activeWidgetSubTabId: widgetSubTabs[0].id,
+  };
+}
+
+export function buildDefaultPluginSettings(): PluginSettings {
+  const workTab = buildDefaultDashboardTab("Work");
+  const privateTab = buildDefaultDashboardTab("Private");
+  return {
+    tabs: [workTab, privateTab],
+    activeTabId: workTab.id,
+    workspaceStartup: { ...DEFAULT_WORKSPACE_STARTUP_SETTINGS },
+    dailyTaskReminder: { ...DEFAULT_DAILY_TASK_REMINDER_SETTINGS },
+    procrastIdeaFolderMappings: [],
+    jiraConnection: { ...DEFAULT_JIRA_CONNECTION_SETTINGS },
+  };
+}
+
+export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = buildDefaultPluginSettings();
 
 export function migrateLoadedSettings(rawLoadedSettings: unknown): PluginSettings {
   if (rawLoadedSettings === null || typeof rawLoadedSettings !== "object") {
-    return cloneDefaultSettings();
+    return buildDefaultPluginSettings();
   }
 
   const loadedSettingsRecord = rawLoadedSettings as Record<string, unknown>;
@@ -198,15 +212,26 @@ export function migrateLoadedSettings(rawLoadedSettings: unknown): PluginSetting
     : [];
 
   if (migratedTabs.length === 0) {
-    return cloneDefaultSettings();
+    return buildDefaultPluginSettings();
   }
 
-  const loadedActiveTabNameRaw = loadedSettingsRecord.activeTabName;
-  const activeTabName =
-    typeof loadedActiveTabNameRaw === "string" &&
-    migratedTabs.some((tab) => tab.name === loadedActiveTabNameRaw)
-      ? loadedActiveTabNameRaw
-      : migratedTabs[0].name;
+  // Settings saved before ids existed referenced tabs by name; map the legacy name onto the
+  // now-assigned id (first occurrence wins) so activeTabId and idea mappings keep pointing at
+  // the same tab they used to.
+  const legacyTabNameToTabId = new Map<string, DashboardTabId>();
+  for (const migratedTab of migratedTabs) {
+    if (!legacyTabNameToTabId.has(migratedTab.name)) {
+      legacyTabNameToTabId.set(migratedTab.name, migratedTab.id);
+    }
+  }
+  const validTabIds = new Set(migratedTabs.map((tab) => tab.id));
+
+  const activeTabId = resolveLoadedActiveTabId(
+    loadedSettingsRecord,
+    validTabIds,
+    legacyTabNameToTabId,
+    migratedTabs[0].id,
+  );
 
   const workspaceStartup = migrateLoadedWorkspaceStartupSettings(
     loadedSettingsRecord.workspaceStartup,
@@ -214,16 +239,38 @@ export function migrateLoadedSettings(rawLoadedSettings: unknown): PluginSetting
 
   return {
     tabs: migratedTabs,
-    activeTabName,
+    activeTabId,
     workspaceStartup,
     dailyTaskReminder: migrateLoadedDailyTaskReminderSettings(
       loadedSettingsRecord.dailyTaskReminder,
     ),
     procrastIdeaFolderMappings: migrateLoadedProcrastIdeaFolderMappings(
       loadedSettingsRecord.procrastIdeaFolderMappings,
+      validTabIds,
+      legacyTabNameToTabId,
     ),
     jiraConnection: migrateLoadedJiraConnectionSettings(loadedSettingsRecord.jiraConnection),
   };
+}
+
+function resolveLoadedActiveTabId(
+  loadedSettingsRecord: Record<string, unknown>,
+  validTabIds: Set<DashboardTabId>,
+  legacyTabNameToTabId: Map<string, DashboardTabId>,
+  fallbackTabId: DashboardTabId,
+): DashboardTabId {
+  const loadedActiveTabIdRaw = loadedSettingsRecord.activeTabId;
+  if (typeof loadedActiveTabIdRaw === "string" && validTabIds.has(loadedActiveTabIdRaw)) {
+    return loadedActiveTabIdRaw;
+  }
+  const loadedActiveTabNameRaw = loadedSettingsRecord.activeTabName;
+  if (typeof loadedActiveTabNameRaw === "string") {
+    const tabIdForLegacyName = legacyTabNameToTabId.get(loadedActiveTabNameRaw);
+    if (tabIdForLegacyName !== undefined) {
+      return tabIdForLegacyName;
+    }
+  }
+  return fallbackTabId;
 }
 
 function migrateLoadedDailyTaskReminderSettings(
@@ -302,6 +349,11 @@ function migrateLoadedTab(rawTab: unknown): DashboardTab | null {
     return null;
   }
 
+  const tabId =
+    typeof rawTabRecord.id === "string" && rawTabRecord.id.trim().length > 0
+      ? rawTabRecord.id
+      : generateStableId();
+
   const folderScopes = Array.isArray(rawTabRecord.folderScopes)
     ? rawTabRecord.folderScopes
         .filter((entry): entry is string => typeof entry === "string")
@@ -338,14 +390,10 @@ function migrateLoadedTab(rawTab: unknown): DashboardTab | null {
   const widgetSubTabs =
     parsedWidgetSubTabs.length > 0 ? parsedWidgetSubTabs : buildDefaultWidgetSubTabs();
 
-  const rawActiveWidgetSubTabName = rawTabRecord.activeWidgetSubTabName;
-  const activeWidgetSubTabName =
-    typeof rawActiveWidgetSubTabName === "string" &&
-    widgetSubTabs.some((widgetSubTab) => widgetSubTab.name === rawActiveWidgetSubTabName)
-      ? rawActiveWidgetSubTabName
-      : widgetSubTabs[0].name;
+  const activeWidgetSubTabId = resolveLoadedActiveWidgetSubTabId(rawTabRecord, widgetSubTabs);
 
   return {
+    id: tabId,
     name: tabName,
     folderScopes,
     dailyNoteFolderPath,
@@ -354,8 +402,31 @@ function migrateLoadedTab(rawTab: unknown): DashboardTab | null {
     collapsedWidgetIdentifiers,
     pinnedProjects,
     widgetSubTabs,
-    activeWidgetSubTabName,
+    activeWidgetSubTabId,
   };
+}
+
+function resolveLoadedActiveWidgetSubTabId(
+  rawTabRecord: Record<string, unknown>,
+  widgetSubTabs: WidgetSubTab[],
+): WidgetSubTabId {
+  const rawActiveWidgetSubTabId = rawTabRecord.activeWidgetSubTabId;
+  if (
+    typeof rawActiveWidgetSubTabId === "string" &&
+    widgetSubTabs.some((widgetSubTab) => widgetSubTab.id === rawActiveWidgetSubTabId)
+  ) {
+    return rawActiveWidgetSubTabId;
+  }
+  const rawActiveWidgetSubTabName = rawTabRecord.activeWidgetSubTabName;
+  if (typeof rawActiveWidgetSubTabName === "string") {
+    const matchingByLegacyName = widgetSubTabs.find(
+      (widgetSubTab) => widgetSubTab.name === rawActiveWidgetSubTabName,
+    );
+    if (matchingByLegacyName !== undefined) {
+      return matchingByLegacyName.id;
+    }
+  }
+  return widgetSubTabs[0].id;
 }
 
 function migrateLoadedWorkingDayIndices(rawWorkingDayIndices: unknown): DayOfWeekIndex[] {
@@ -390,7 +461,11 @@ function migrateLoadedWidgetSubTab(rawWidgetSubTab: unknown): WidgetSubTab | nul
   const widgetIdentifiers = Array.isArray(rawWidgetSubTabRecord.widgetIdentifiers)
     ? rawWidgetSubTabRecord.widgetIdentifiers.filter(isKnownWidgetIdentifier)
     : [];
-  return { name: widgetSubTabName, widgetIdentifiers };
+  const widgetSubTabId =
+    typeof rawWidgetSubTabRecord.id === "string" && rawWidgetSubTabRecord.id.trim().length > 0
+      ? rawWidgetSubTabRecord.id
+      : generateStableId();
+  return { id: widgetSubTabId, name: widgetSubTabName, widgetIdentifiers };
 }
 
 function migrateLoadedPinnedProject(rawPinnedProject: unknown): PinnedProject | null {
@@ -405,6 +480,11 @@ function migrateLoadedPinnedProject(rawPinnedProject: unknown): PinnedProject | 
   if (folderPath.length === 0) {
     return null;
   }
+
+  const pinnedProjectId =
+    typeof rawPinnedProjectRecord.id === "string" && rawPinnedProjectRecord.id.trim().length > 0
+      ? rawPinnedProjectRecord.id
+      : generateStableId();
 
   const displayName =
     typeof rawPinnedProjectRecord.displayName === "string"
@@ -435,6 +515,7 @@ function migrateLoadedPinnedProject(rawPinnedProject: unknown): PinnedProject | 
       : "";
 
   return {
+    id: pinnedProjectId,
     folderPath,
     displayName,
     manuallyAssignedContainerNames,
@@ -445,17 +526,23 @@ function migrateLoadedPinnedProject(rawPinnedProject: unknown): PinnedProject | 
 
 function migrateLoadedProcrastIdeaFolderMappings(
   rawMappings: unknown,
+  validTabIds: Set<DashboardTabId>,
+  legacyTabNameToTabId: Map<string, DashboardTabId>,
 ): ProcrastIdeaFolderMapping[] {
   if (!Array.isArray(rawMappings)) {
     return [];
   }
   return rawMappings
-    .map((rawMapping) => migrateLoadedProcrastIdeaFolderMapping(rawMapping))
+    .map((rawMapping) =>
+      migrateLoadedProcrastIdeaFolderMapping(rawMapping, validTabIds, legacyTabNameToTabId),
+    )
     .filter((mapping): mapping is ProcrastIdeaFolderMapping => mapping !== null);
 }
 
 function migrateLoadedProcrastIdeaFolderMapping(
   rawMapping: unknown,
+  validTabIds: Set<DashboardTabId>,
+  legacyTabNameToTabId: Map<string, DashboardTabId>,
 ): ProcrastIdeaFolderMapping | null {
   if (rawMapping === null || typeof rawMapping !== "object") {
     return null;
@@ -467,20 +554,38 @@ function migrateLoadedProcrastIdeaFolderMapping(
     typeof rawMappingRecord.targetFolderPath === "string"
       ? rawMappingRecord.targetFolderPath.trim()
       : "";
-  const tabName =
-    typeof rawMappingRecord.tabName === "string" ? rawMappingRecord.tabName.trim() : "";
-  if (ideaUuid.length === 0 || targetFolderPath.length === 0 || tabName.length === 0) {
+  const tabId = resolveLoadedMappingTabId(rawMappingRecord, validTabIds, legacyTabNameToTabId);
+  if (ideaUuid.length === 0 || targetFolderPath.length === 0 || tabId === null) {
     return null;
   }
   return {
     ideaUuid,
     targetFolderPath,
-    tabName,
+    tabId,
     createdAt:
       typeof rawMappingRecord.createdAt === "string" ? rawMappingRecord.createdAt : "",
     ideaTitle:
       typeof rawMappingRecord.ideaTitle === "string" ? rawMappingRecord.ideaTitle : "",
   };
+}
+
+function resolveLoadedMappingTabId(
+  rawMappingRecord: Record<string, unknown>,
+  validTabIds: Set<DashboardTabId>,
+  legacyTabNameToTabId: Map<string, DashboardTabId>,
+): DashboardTabId | null {
+  const rawTabId = rawMappingRecord.tabId;
+  if (typeof rawTabId === "string" && validTabIds.has(rawTabId)) {
+    return rawTabId;
+  }
+  const rawTabName = rawMappingRecord.tabName;
+  if (typeof rawTabName === "string") {
+    const tabIdForLegacyName = legacyTabNameToTabId.get(rawTabName.trim());
+    if (tabIdForLegacyName !== undefined) {
+      return tabIdForLegacyName;
+    }
+  }
+  return null;
 }
 
 function isKnownWidgetIdentifier(candidate: unknown): candidate is WidgetIdentifier {
@@ -490,92 +595,51 @@ function isKnownWidgetIdentifier(candidate: unknown): candidate is WidgetIdentif
   );
 }
 
-function cloneDefaultSettings(): PluginSettings {
-  return {
-    tabs: DEFAULT_PLUGIN_SETTINGS.tabs.map((defaultTab) => ({
-      name: defaultTab.name,
-      folderScopes: [...defaultTab.folderScopes],
-      dailyNoteFolderPath: defaultTab.dailyNoteFolderPath,
-      workingDayIndices: [...defaultTab.workingDayIndices],
-      enabledWidgets: [...defaultTab.enabledWidgets],
-      collapsedWidgetIdentifiers: [...defaultTab.collapsedWidgetIdentifiers],
-      pinnedProjects: defaultTab.pinnedProjects.map((pinnedProject) => ({
-        folderPath: pinnedProject.folderPath,
-        displayName: pinnedProject.displayName,
-        manuallyAssignedContainerNames: [...pinnedProject.manuallyAssignedContainerNames],
-        storedShellCommands: pinnedProject.storedShellCommands.map((shellCommand) => ({
-          label: shellCommand.label,
-          command: shellCommand.command,
-        })),
-        jiraProjectKey: pinnedProject.jiraProjectKey,
-      })),
-      widgetSubTabs: defaultTab.widgetSubTabs.map((widgetSubTab) => ({
-        name: widgetSubTab.name,
-        widgetIdentifiers: [...widgetSubTab.widgetIdentifiers],
-      })),
-      activeWidgetSubTabName: defaultTab.activeWidgetSubTabName,
-    })),
-    activeTabName: DEFAULT_PLUGIN_SETTINGS.activeTabName,
-    workspaceStartup: { ...DEFAULT_PLUGIN_SETTINGS.workspaceStartup },
-    dailyTaskReminder: { ...DEFAULT_PLUGIN_SETTINGS.dailyTaskReminder },
-    procrastIdeaFolderMappings: DEFAULT_PLUGIN_SETTINGS.procrastIdeaFolderMappings.map(
-      (mapping) => ({
-        ideaUuid: mapping.ideaUuid,
-        targetFolderPath: mapping.targetFolderPath,
-        tabName: mapping.tabName,
-        createdAt: mapping.createdAt,
-        ideaTitle: mapping.ideaTitle,
-      }),
-    ),
-    jiraConnection: { ...DEFAULT_PLUGIN_SETTINGS.jiraConnection },
-  };
-}
-
-export function findTabByName(
+export function findTabById(
   settings: PluginSettings,
-  tabName: string,
+  tabId: DashboardTabId,
 ): DashboardTab | null {
-  return settings.tabs.find((tab) => tab.name === tabName) ?? null;
+  return settings.tabs.find((tab) => tab.id === tabId) ?? null;
 }
 
 export function resolveActiveTab(settings: PluginSettings): DashboardTab {
-  return findTabByName(settings, settings.activeTabName) ?? settings.tabs[0];
+  return findTabById(settings, settings.activeTabId) ?? settings.tabs[0];
 }
 
 export function resolveActiveWidgetSubTab(tab: DashboardTab): WidgetSubTab {
   const matchingWidgetSubTab = tab.widgetSubTabs.find(
-    (widgetSubTab) => widgetSubTab.name === tab.activeWidgetSubTabName,
+    (widgetSubTab) => widgetSubTab.id === tab.activeWidgetSubTabId,
   );
   return matchingWidgetSubTab ?? tab.widgetSubTabs[0];
 }
 
 // A widget never assigned to any sub-tab (e.g. introduced after the user reorganised) falls
 // back to the first sub-tab so it always renders somewhere rather than vanishing.
-export function resolveEffectiveWidgetSubTabName(
+export function resolveEffectiveWidgetSubTabId(
   tab: DashboardTab,
   widgetIdentifier: WidgetIdentifier,
-): WidgetSubTabName {
+): WidgetSubTabId {
   const owningWidgetSubTab = tab.widgetSubTabs.find((widgetSubTab) =>
     widgetSubTab.widgetIdentifiers.includes(widgetIdentifier),
   );
-  return (owningWidgetSubTab ?? tab.widgetSubTabs[0]).name;
+  return (owningWidgetSubTab ?? tab.widgetSubTabs[0]).id;
 }
 
 export function isWidgetOnWidgetSubTab(
   tab: DashboardTab,
   widgetIdentifier: WidgetIdentifier,
-  widgetSubTabName: WidgetSubTabName,
+  widgetSubTabId: WidgetSubTabId,
 ): boolean {
-  return resolveEffectiveWidgetSubTabName(tab, widgetIdentifier) === widgetSubTabName;
+  return resolveEffectiveWidgetSubTabId(tab, widgetIdentifier) === widgetSubTabId;
 }
 
 export function computeWidgetSubTabsWithWidgetAssignedTo(
   widgetSubTabs: WidgetSubTab[],
   widgetIdentifier: WidgetIdentifier,
-  targetWidgetSubTabName: WidgetSubTabName,
+  targetWidgetSubTabId: WidgetSubTabId,
 ): WidgetSubTab[] {
   return widgetSubTabs.map((widgetSubTab) => {
-    if (widgetSubTab.name === targetWidgetSubTabName) {
+    if (widgetSubTab.id === targetWidgetSubTabId) {
       if (widgetSubTab.widgetIdentifiers.includes(widgetIdentifier)) {
         return widgetSubTab;
       }

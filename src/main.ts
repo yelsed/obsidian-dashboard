@@ -9,7 +9,6 @@ import { openClaudeCodeTerminalView } from "./data/claudeTerminal";
 import { rollOverOpenTasksIntoCurrentDailyNote } from "./data/rollover";
 import {
   DEFAULT_PLUGIN_SETTINGS,
-  findTabByName,
   migrateLoadedSettings,
   type PluginSettings,
 } from "./settings";
@@ -123,13 +122,19 @@ export default class VaultDashboardPlugin extends Plugin {
   }
 
   switchToDashboardTab(tabName: string): void {
-    if (findTabByName(this.currentSettings, tabName) === null) {
+    // The command-palette / Obsidian-CLI surface addresses tabs by their human name; resolve
+    // it to the stable id here so internal state stays id-keyed. First match wins when two
+    // tabs share a name.
+    const matchingTab = this.currentSettings.tabs.find(
+      (candidateTab) => candidateTab.name === tabName,
+    );
+    if (matchingTab === undefined) {
       return;
     }
-    if (this.currentSettings.activeTabName === tabName) {
+    if (this.currentSettings.activeTabId === matchingTab.id) {
       return;
     }
-    void this.replaceSettings({ ...this.currentSettings, activeTabName: tabName });
+    void this.replaceSettings({ ...this.currentSettings, activeTabId: matchingTab.id });
   }
 
   async activateDashboardView(): Promise<void> {

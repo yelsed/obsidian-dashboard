@@ -1,26 +1,28 @@
 <script lang="ts">
-  export let widgetSubTabNames: string[] = [];
-  export let activeWidgetSubTabName: string = "";
-  export let onSelectWidgetSubTab: (widgetSubTabName: string) => void = () => {};
+  type WidgetSubTabEntry = { id: string; name: string };
 
-  function isActiveWidgetSubTab(widgetSubTabName: string): boolean {
-    return widgetSubTabName === activeWidgetSubTabName;
+  export let widgetSubTabs: WidgetSubTabEntry[] = [];
+  export let activeWidgetSubTabId: string = "";
+  export let onSelectWidgetSubTab: (widgetSubTabId: string) => void = () => {};
+
+  function isActiveWidgetSubTab(widgetSubTabId: string): boolean {
+    return widgetSubTabId === activeWidgetSubTabId;
   }
 </script>
 
 <nav class="widget-sub-tab-bar" aria-label="Widget sub-tabs">
   <ul class="widget-sub-tab-list" role="tablist">
-    {#each widgetSubTabNames as widgetSubTabName}
+    {#each widgetSubTabs as widgetSubTab (widgetSubTab.id)}
       <li class="widget-sub-tab-list-item">
         <button
           type="button"
           class="widget-sub-tab-button"
-          class:is-active={isActiveWidgetSubTab(widgetSubTabName)}
+          class:is-active={isActiveWidgetSubTab(widgetSubTab.id)}
           role="tab"
-          aria-selected={isActiveWidgetSubTab(widgetSubTabName)}
-          on:click={() => onSelectWidgetSubTab(widgetSubTabName)}
+          aria-selected={isActiveWidgetSubTab(widgetSubTab.id)}
+          on:click={() => onSelectWidgetSubTab(widgetSubTab.id)}
         >
-          {widgetSubTabName}
+          {widgetSubTab.name}
         </button>
       </li>
     {/each}

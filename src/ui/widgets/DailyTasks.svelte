@@ -5,6 +5,7 @@
   type OpenTask = {
     taskContent: string;
     sourceFolderName: string;
+    sourceFilePath: string;
   };
 
   type WidgetViewState = "data" | "loading" | "empty" | "error";
@@ -15,10 +16,10 @@
   export let todayDailyNoteLabel: string = "2026-05-18 daily";
   export let todayDailyNoteExists: boolean = true;
   export let openTasks: OpenTask[] = [
-    { taskContent: "Reply to client review", sourceFolderName: "fivespark" },
-    { taskContent: "Push staging build", sourceFolderName: "fivespark" },
-    { taskContent: "Read incident postmortem", sourceFolderName: "learning" },
-    { taskContent: "Refactor procrast list output", sourceFolderName: "yelsed" },
+    { taskContent: "Reply to client review", sourceFolderName: "fivespark", sourceFilePath: "fivespark/2026-05-18.md" },
+    { taskContent: "Push staging build", sourceFolderName: "fivespark", sourceFilePath: "fivespark/2026-05-18.md" },
+    { taskContent: "Read incident postmortem", sourceFolderName: "learning", sourceFilePath: "learning/2026-05-18.md" },
+    { taskContent: "Refactor procrast list output", sourceFolderName: "yelsed", sourceFilePath: "yelsed/2026-05-18.md" },
   ];
   export let totalOpenTaskCount: number = 12;
   export let tasksCreatedTodayCount: number = 3;

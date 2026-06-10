@@ -197,8 +197,8 @@ function createEmptyRunSnapshot(runKey: string): ShellCommandRunSnapshot {
 }
 
 export function buildShellCommandRunKey(
-  pinnedProjectFolderPath: string,
+  pinnedProjectId: string,
   shellCommandIndex: number,
 ): string {
-  return `${pinnedProjectFolderPath}::${shellCommandIndex}`;
+  return `${pinnedProjectId}::${shellCommandIndex}`;
 }

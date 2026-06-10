@@ -5,11 +5,11 @@ type JiraIssueSortMode = "updated" | "key" | "priority" | "due" | "status" | "su
 
 export type JiraIssuesModalParameters = {
   jiraProjectKey: string;
-  pinnedProjectFolderPath: string;
+  pinnedProjectId: string;
   issues: JiraIssueSummary[];
   onOpenIssueInBrowser: (issueBrowserUrl: string) => void;
   onStartClaudeSessionFromJiraIssue: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     issueKey: string,
   ) => void;
 };
@@ -150,7 +150,7 @@ export class JiraIssuesModal extends Modal {
     );
     fixButton.addEventListener("click", () => {
       this.parameters.onStartClaudeSessionFromJiraIssue(
-        this.parameters.pinnedProjectFolderPath,
+        this.parameters.pinnedProjectId,
         issue.issueKey,
       );
       this.close();

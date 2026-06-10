@@ -15,7 +15,7 @@
     editedFileTotalCount: number;
     totalMessageCount: number;
     gitBranch: string | null;
-    projectFolderPath: string;
+    projectId: string;
     projectDisplayName: string;
   };
 
@@ -42,11 +42,11 @@
   export let isCollapsed: boolean = false;
   export let onToggleCollapsed: () => void = () => {};
   export let onCopyClaudeResumeCommand: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     sessionId: string,
   ) => void = () => {};
   export let onRelaunchClaudeSession: (
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     sessionId: string,
   ) => void = () => {};
 
@@ -70,7 +70,7 @@
           editedFileTotalCount: claudeSession.editedFileTotalCount,
           totalMessageCount: claudeSession.totalMessageCount,
           gitBranch: claudeSession.gitBranch,
-          projectFolderPath: pinnedProject.folderPath,
+          projectId: pinnedProject.id,
           projectDisplayName:
             pinnedProject.displayName.length > 0
               ? pinnedProject.displayName
@@ -91,13 +91,13 @@
     <p class="widget-empty">No Claude sessions in pinned projects yet.</p>
   {:else}
     <ul class="claude-session-list">
-      {#each flattenedRecentSessions as claudeSession (claudeSession.projectFolderPath + "::" + claudeSession.sessionId)}
+      {#each flattenedRecentSessions as claudeSession (claudeSession.projectId + "::" + claudeSession.sessionId)}
         <li class="claude-session-row">
           <button
             type="button"
             class="claude-session-button"
-            title="Copy `claude --resume {claudeSession.sessionId}` to clipboard"
-            on:click={() => onCopyClaudeResumeCommand(claudeSession.projectFolderPath, claudeSession.sessionId)}
+            title="Copy claude --resume {claudeSession.sessionId} to clipboard"
+            on:click={() => onCopyClaudeResumeCommand(claudeSession.projectId, claudeSession.sessionId)}
           >
             <span class="claude-session-row-top">
               <span class="claude-session-project">{claudeSession.projectDisplayName}</span>
@@ -123,7 +123,7 @@
             type="button"
             class="claude-session-relaunch-button"
             title="Resume this session in the Obsidian Claude Code terminal"
-            on:click={() => onRelaunchClaudeSession(claudeSession.projectFolderPath, claudeSession.sessionId)}
+            on:click={() => onRelaunchClaudeSession(claudeSession.projectId, claudeSession.sessionId)}
           >
             <span class="claude-session-relaunch-glyph" aria-hidden="true">▶</span>
             resume

@@ -9,6 +9,7 @@ import {
   type ProcrastIdea,
 } from "../data/procrast";
 import {
+  generateStableId,
   resolveActiveTab,
   type DashboardTab,
   type PluginSettings,
@@ -49,7 +50,7 @@ export async function openPlanProcrastIdeaFlow(
     ideas,
     initialIdeaUuid: request.initialIdea?.uuid ?? ideas[0]?.uuid ?? "",
     onConfirm: async (selection) => {
-      await executePlanProcrastIdeaSelection(request, activeTab.name, selection);
+      await executePlanProcrastIdeaSelection(request, activeTab.id, selection);
     },
   }).open();
 }
@@ -270,7 +271,7 @@ class PlanProcrastIdeaModal extends Modal {
 
 async function executePlanProcrastIdeaSelection(
   request: PlanProcrastIdeaFlowRequest,
-  activeTabName: string,
+  activeTabId: string,
   selection: PlanProcrastIdeaSelection,
 ): Promise<void> {
   const targetFolderPath = resolveEnteredFolderPath(selection.targetFolderPath);
@@ -284,7 +285,7 @@ async function executePlanProcrastIdeaSelection(
   const ideaTitle = resolveProcrastIdeaTitle(selection.idea);
   const nextSettings = recordProcrastIdeaFolderMapping(
     request.getSettings(),
-    activeTabName,
+    activeTabId,
     selection.idea.uuid,
     ideaTitle,
     targetFolderPath,
@@ -327,7 +328,7 @@ async function verifyExistingTargetFolder(targetFolderPath: string): Promise<boo
 
 function recordProcrastIdeaFolderMapping(
   settings: PluginSettings,
-  activeTabName: string,
+  activeTabId: string,
   ideaUuid: string,
   ideaTitle: string,
   targetFolderPath: string,
@@ -337,7 +338,7 @@ function recordProcrastIdeaFolderMapping(
   const nextMapping: ProcrastIdeaFolderMapping = {
     ideaUuid,
     targetFolderPath,
-    tabName: activeTabName,
+    tabId: activeTabId,
     createdAt: new Date().toISOString(),
     ideaTitle,
   };
@@ -345,13 +346,13 @@ function recordProcrastIdeaFolderMapping(
   nextSettings.procrastIdeaFolderMappings = nextSettings.procrastIdeaFolderMappings
     .filter(
       (mapping) =>
-        mapping.tabName !== activeTabName ||
+        mapping.tabId !== activeTabId ||
         !folderPathsPointToSameLocation(mapping.targetFolderPath, targetFolderPath),
     )
     .concat(nextMapping);
 
   if (shouldPinProject) {
-    const activeTab = nextSettings.tabs.find((tab) => tab.name === activeTabName);
+    const activeTab = nextSettings.tabs.find((tab) => tab.id === activeTabId);
     if (
       activeTab !== undefined &&
       !activeTab.pinnedProjects.some((project) =>
@@ -359,6 +360,7 @@ function recordProcrastIdeaFolderMapping(
       )
     ) {
       activeTab.pinnedProjects.push({
+        id: generateStableId(),
         folderPath: targetFolderPath,
         displayName: nodePath.basename(targetFolderPath),
         manuallyAssignedContainerNames: [],
@@ -373,10 +375,11 @@ function recordProcrastIdeaFolderMapping(
 
 function clonePluginSettings(settings: PluginSettings): PluginSettings {
   return {
-    activeTabName: settings.activeTabName,
+    activeTabId: settings.activeTabId,
     workspaceStartup: { ...settings.workspaceStartup },
     dailyTaskReminder: { ...settings.dailyTaskReminder },
     tabs: settings.tabs.map((dashboardTab) => ({
+      id: dashboardTab.id,
       name: dashboardTab.name,
       folderScopes: [...dashboardTab.folderScopes],
       dailyNoteFolderPath: dashboardTab.dailyNoteFolderPath,
@@ -384,6 +387,7 @@ function clonePluginSettings(settings: PluginSettings): PluginSettings {
       enabledWidgets: [...dashboardTab.enabledWidgets],
       collapsedWidgetIdentifiers: [...dashboardTab.collapsedWidgetIdentifiers],
       pinnedProjects: dashboardTab.pinnedProjects.map((pinnedProject) => ({
+        id: pinnedProject.id,
         folderPath: pinnedProject.folderPath,
         displayName: pinnedProject.displayName,
         manuallyAssignedContainerNames: [...pinnedProject.manuallyAssignedContainerNames],
@@ -394,15 +398,16 @@ function clonePluginSettings(settings: PluginSettings): PluginSettings {
         jiraProjectKey: pinnedProject.jiraProjectKey,
       })),
       widgetSubTabs: dashboardTab.widgetSubTabs.map((widgetSubTab) => ({
+        id: widgetSubTab.id,
         name: widgetSubTab.name,
         widgetIdentifiers: [...widgetSubTab.widgetIdentifiers],
       })),
-      activeWidgetSubTabName: dashboardTab.activeWidgetSubTabName,
+      activeWidgetSubTabId: dashboardTab.activeWidgetSubTabId,
     })),
     procrastIdeaFolderMappings: settings.procrastIdeaFolderMappings.map((mapping) => ({
       ideaUuid: mapping.ideaUuid,
       targetFolderPath: mapping.targetFolderPath,
-      tabName: mapping.tabName,
+      tabId: mapping.tabId,
       createdAt: mapping.createdAt,
       ideaTitle: mapping.ideaTitle,
     })),

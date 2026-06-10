@@ -55,9 +55,7 @@
   import { JiraIssuesModal } from "./JiraIssuesModal";
   import {
     ALL_WIDGET_IDENTIFIERS,
-    DEFAULT_ENABLED_WIDGET_IDENTIFIERS,
-    DEFAULT_WIDGET_SUB_TAB_NAME,
-    buildDefaultWidgetSubTabs,
+    buildDefaultDashboardTab,
     buildDailyNotePathForBasename,
     buildDailyNotePathForDate,
     formatDailyNoteBasenameForDate,
@@ -113,13 +111,13 @@
   const procrastIdeasSnapshotData = procrastIdeasStore.store;
   const jiraSnapshotData = jiraIssuesStore.store;
 
-  let expandedPinnedProjectFolderPaths: Set<string> = new Set();
+  let expandedPinnedProjectIds: Set<string> = new Set();
   let hasRequestedInitialProcrastIdeasRefresh = false;
 
   pinnedProjectsStore.setPinnedProjectsConfig(initialActiveTab.pinnedProjects);
   pinnedProjectsStore.setProcrastIdeaFolderMappings(
     initialSettingsSnapshot.procrastIdeaFolderMappings.filter(
-      (mapping) => mapping.tabName === initialActiveTab.name,
+      (mapping) => mapping.tabId === initialActiveTab.id,
     ),
   );
   dockerContainersStore.startPolling();
@@ -162,14 +160,15 @@
 
   $: currentSettings = $settingsStore;
   $: activeTab = resolveActiveTab(currentSettings);
-  $: tabNames = currentSettings.tabs.map((tab) => tab.name);
+  $: tabsForBar = currentSettings.tabs.map((tab) => ({ id: tab.id, name: tab.name }));
   $: activeFolderScopes = activeTab.folderScopes;
   $: activeFolderScopesKey = activeFolderScopes.join(" ");
   $: enabledWidgetsForActiveTab = activeTab.enabledWidgets;
   $: activeWidgetSubTab = resolveActiveWidgetSubTab(activeTab);
-  $: widgetSubTabNamesForActiveTab = activeTab.widgetSubTabs.map(
-    (widgetSubTab) => widgetSubTab.name,
-  );
+  $: widgetSubTabsForActiveTab = activeTab.widgetSubTabs.map((widgetSubTab) => ({
+    id: widgetSubTab.id,
+    name: widgetSubTab.name,
+  }));
   $: shouldShowWidgetSubTabBar = activeTab.widgetSubTabs.length > 1;
   // Derived as a Set so the template gates depend on a reactive value directly; calling a
   // function inside {#if} does not re-evaluate when the active sub-tab changes.
@@ -177,7 +176,7 @@
     ALL_WIDGET_IDENTIFIERS.filter(
       (widgetIdentifier) =>
         enabledWidgetsForActiveTab.includes(widgetIdentifier) &&
-        isWidgetOnWidgetSubTab(activeTab, widgetIdentifier, activeWidgetSubTab.name),
+        isWidgetOnWidgetSubTab(activeTab, widgetIdentifier, activeWidgetSubTab.id),
     ),
   );
   $: collapsedWidgetIdentifiersForActiveTab = new Set<WidgetIdentifier>(
@@ -217,6 +216,7 @@
   $: activePinnedProjectsConfigKey = activePinnedProjectsConfig
     .map((pinnedProject) =>
       [
+        pinnedProject.id,
         pinnedProject.folderPath,
         pinnedProject.displayName,
         pinnedProject.manuallyAssignedContainerNames.join("|"),
@@ -228,14 +228,14 @@
     .join("\n");
 
   $: activeProcrastIdeaFolderMappings = currentSettings.procrastIdeaFolderMappings.filter(
-    (mapping) => mapping.tabName === activeTab.name,
+    (mapping) => mapping.tabId === activeTab.id,
   );
   $: activeProcrastIdeaFolderMappingsKey = activeProcrastIdeaFolderMappings
     .map((mapping) =>
       [
         mapping.ideaUuid,
         mapping.targetFolderPath,
-        mapping.tabName,
+        mapping.tabId,
         mapping.createdAt,
         mapping.ideaTitle,
       ].join("::"),
@@ -280,8 +280,8 @@
   let lastSeenActiveTabReference: DashboardTab = initialActiveTab;
   $: if (activeTab !== lastSeenActiveTabReference) {
     lastSeenActiveTabReference = activeTab;
-    expandedPinnedProjectFolderPaths = new Set();
-    pinnedProjectsStore.setExpandedFolderPaths(expandedPinnedProjectFolderPaths);
+    expandedPinnedProjectIds = new Set();
+    pinnedProjectsStore.setExpandedProjectIds(expandedPinnedProjectIds);
   }
 
   onDestroy(() => {
@@ -304,40 +304,31 @@
     return enabledWidgetsForActiveTab.includes(widgetIdentifier);
   }
 
-  function handleTabSelection(selectedTabName: string): void {
-    if (selectedTabName === currentSettings.activeTabName) {
+  function handleTabSelection(selectedTabId: string): void {
+    if (selectedTabId === currentSettings.activeTabId) {
       return;
     }
-    void replaceSettings({ ...currentSettings, activeTabName: selectedTabName });
+    void replaceSettings({ ...currentSettings, activeTabId: selectedTabId });
   }
 
-  function handleWidgetSubTabSelection(selectedWidgetSubTabName: string): void {
-    if (selectedWidgetSubTabName === activeTab.activeWidgetSubTabName) {
+  function handleWidgetSubTabSelection(selectedWidgetSubTabId: string): void {
+    if (selectedWidgetSubTabId === activeTab.activeWidgetSubTabId) {
       return;
     }
     const nextTabs = currentSettings.tabs.map((tab) =>
-      tab.name === activeTab.name
-        ? { ...tab, activeWidgetSubTabName: selectedWidgetSubTabName }
+      tab.id === activeTab.id
+        ? { ...tab, activeWidgetSubTabId: selectedWidgetSubTabId }
         : tab,
     );
     void replaceSettings({ ...currentSettings, tabs: nextTabs });
   }
 
   function handleAddTabRequest(): void {
-    const newTabName = pickNextUnusedTabName(currentSettings);
-    const newTab: DashboardTab = {
-      name: newTabName,
-      folderScopes: [],
-      enabledWidgets: [...DEFAULT_ENABLED_WIDGET_IDENTIFIERS],
-      collapsedWidgetIdentifiers: [],
-      pinnedProjects: [],
-      widgetSubTabs: buildDefaultWidgetSubTabs(),
-      activeWidgetSubTabName: DEFAULT_WIDGET_SUB_TAB_NAME,
-    };
+    const newTab: DashboardTab = buildDefaultDashboardTab(pickNextUnusedTabName(currentSettings));
     void replaceSettings({
       ...currentSettings,
       tabs: [...currentSettings.tabs, newTab],
-      activeTabName: newTabName,
+      activeTabId: newTab.id,
     });
   }
 
@@ -363,7 +354,7 @@
     nextCollapsedWidgetIdentifiers: WidgetIdentifier[],
   ): void {
     const nextTabs = currentSettings.tabs.map((tab) =>
-      tab.name === activeTab.name
+      tab.id === activeTab.id
         ? { ...tab, collapsedWidgetIdentifiers: nextCollapsedWidgetIdentifiers }
         : tab,
     );
@@ -395,19 +386,27 @@
     void shell.openExternal(issueBrowserUrl);
   }
 
+  function resolvePinnedProjectForWidgetById(pinnedProjectId: string) {
+    return (
+      get(pinnedProjectsForWidgetData).find((project) => project.id === pinnedProjectId) ?? null
+    );
+  }
+
+  function resolvePinnedProjectFolderPathById(pinnedProjectId: string): string | null {
+    return resolvePinnedProjectForWidgetById(pinnedProjectId)?.folderPath ?? null;
+  }
+
   function handleShowAllJiraIssuesForProject(
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     jiraProjectKey: string,
   ): void {
-    const projectForWidget = get(pinnedProjectsForWidgetData).find(
-      (project) => project.folderPath === pinnedProjectFolderPath,
-    );
-    if (projectForWidget === undefined) {
+    const projectForWidget = resolvePinnedProjectForWidgetById(pinnedProjectId);
+    if (projectForWidget === null) {
       return;
     }
     new JiraIssuesModal(obsidianApp, {
       jiraProjectKey,
-      pinnedProjectFolderPath,
+      pinnedProjectId,
       issues: projectForWidget.jiraIssuesForProject,
       onOpenIssueInBrowser: handleOpenJiraIssueInBrowser,
       onStartClaudeSessionFromJiraIssue: handleStartClaudeSessionFromJiraIssue,
@@ -415,9 +414,13 @@
   }
 
   async function handleStartClaudeSessionFromJiraIssue(
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     issueKey: string,
   ): Promise<void> {
+    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
+    if (pinnedProjectFolderPath === null) {
+      return;
+    }
     new Notice(`Fetching ${issueKey} from Jira…`);
     const detailResult = await fetchJiraIssueDetail(currentSettings.jiraConnection, issueKey);
     if (!detailResult.ok) {
@@ -693,21 +696,25 @@
     }
   }
 
-  function handleTogglePinnedProjectExpansion(displayedFolderPath: string): void {
-    const nextExpandedFolderPaths = new Set(expandedPinnedProjectFolderPaths);
-    if (nextExpandedFolderPaths.has(displayedFolderPath)) {
-      nextExpandedFolderPaths.delete(displayedFolderPath);
+  function handleTogglePinnedProjectExpansion(pinnedProjectId: string): void {
+    const nextExpandedProjectIds = new Set(expandedPinnedProjectIds);
+    if (nextExpandedProjectIds.has(pinnedProjectId)) {
+      nextExpandedProjectIds.delete(pinnedProjectId);
     } else {
-      nextExpandedFolderPaths.add(displayedFolderPath);
+      nextExpandedProjectIds.add(pinnedProjectId);
     }
-    expandedPinnedProjectFolderPaths = nextExpandedFolderPaths;
-    pinnedProjectsStore.setExpandedFolderPaths(expandedPinnedProjectFolderPaths);
+    expandedPinnedProjectIds = nextExpandedProjectIds;
+    pinnedProjectsStore.setExpandedProjectIds(expandedPinnedProjectIds);
   }
 
   function handleOpenPinnedProjectChildFile(
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     relativeChildFilePath: string,
   ): void {
+    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
+    if (pinnedProjectFolderPath === null) {
+      return;
+    }
     const absoluteChildFilePath = nodePath.resolve(
       pinnedProjectFolderPath,
       relativeChildFilePath,
@@ -787,23 +794,27 @@
   }
 
   function handleRunPinnedProjectShellCommand(
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     shellCommandIndex: number,
     commandLine: string,
   ): void {
+    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
+    if (pinnedProjectFolderPath === null) {
+      return;
+    }
     projectShellCommandsStore.startCommandRun({
-      runKey: buildShellCommandRunKey(pinnedProjectFolderPath, shellCommandIndex),
+      runKey: buildShellCommandRunKey(pinnedProjectId, shellCommandIndex),
       workingDirectoryAbsolutePath: pinnedProjectFolderPath,
       commandLine,
     });
   }
 
   function handleKillPinnedProjectShellCommand(
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     shellCommandIndex: number,
   ): void {
     projectShellCommandsStore.killCommandRun(
-      buildShellCommandRunKey(pinnedProjectFolderPath, shellCommandIndex),
+      buildShellCommandRunKey(pinnedProjectId, shellCommandIndex),
     );
   }
 
@@ -837,8 +848,12 @@
   }
 
   async function handleCreateProjectGoalsFile(
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
   ): Promise<void> {
+    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
+    if (pinnedProjectFolderPath === null) {
+      return;
+    }
     const absoluteGoalsFilePath = resolveProjectGoalsFilePath(pinnedProjectFolderPath);
     const vaultRelativeGoalsFilePath =
       resolveVaultRelativeFilePathIfWithinVault(absoluteGoalsFilePath);
@@ -912,7 +927,11 @@
     return isErrorWithCode(error, "ENOENT");
   }
 
-  function handleOpenProjectGoalsFile(pinnedProjectFolderPath: string): void {
+  function handleOpenProjectGoalsFile(pinnedProjectId: string): void {
+    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
+    if (pinnedProjectFolderPath === null) {
+      return;
+    }
     openAbsoluteMarkdownFilePath(resolveProjectGoalsFilePath(pinnedProjectFolderPath));
   }
 
@@ -937,9 +956,13 @@
   }
 
   function handleCopyClaudeResumeCommandToClipboard(
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     sessionId: string,
   ): void {
+    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
+    if (pinnedProjectFolderPath === null) {
+      return;
+    }
     const resumeCommandLine = buildClaudeResumeCommandLine(pinnedProjectFolderPath, sessionId);
     void copyTextToClipboardWithFallback(resumeCommandLine).then((wasCopied) => {
       new Notice(
@@ -951,9 +974,13 @@
   }
 
   function handleRelaunchClaudeSession(
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     sessionId: string,
   ): void {
+    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
+    if (pinnedProjectFolderPath === null) {
+      return;
+    }
     void launchInObsidianClaudeTerminal(obsidianApp, {
       workingDirectoryAbsolutePath: pinnedProjectFolderPath,
       resumeSessionId: sessionId,
@@ -962,8 +989,12 @@
   }
 
   async function handleStartClaudeSessionFromProjectGoals(
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
   ): Promise<void> {
+    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
+    if (pinnedProjectFolderPath === null) {
+      return;
+    }
     const initialPromptText = await readProjectGoalsPrompt(pinnedProjectFolderPath);
     if (initialPromptText === null) {
       return;
@@ -1067,8 +1098,12 @@
   }
 
   async function handleCollectOpenTasksIntoProjectGoals(
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
   ): Promise<void> {
+    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
+    if (pinnedProjectFolderPath === null) {
+      return;
+    }
     const collectedOpenTasks = await collectAllOpenTasksForProjectFolder(
       pinnedProjectFolderPath,
     );
@@ -1113,11 +1148,11 @@
   }
 
   function handleClearPinnedProjectShellCommandOutput(
-    pinnedProjectFolderPath: string,
+    pinnedProjectId: string,
     shellCommandIndex: number,
   ): void {
     projectShellCommandsStore.clearCommandRunOutput(
-      buildShellCommandRunKey(pinnedProjectFolderPath, shellCommandIndex),
+      buildShellCommandRunKey(pinnedProjectId, shellCommandIndex),
     );
   }
 
@@ -1198,8 +1233,8 @@
 
 <div class="vault-dashboard" data-density="comfortable">
   <TabBar
-    {tabNames}
-    activeTabName={currentSettings.activeTabName}
+    tabs={tabsForBar}
+    activeTabId={currentSettings.activeTabId}
     areAllWidgetsCollapsed={areAllEnabledWidgetsCollapsed}
     onSelectTab={handleTabSelection}
     onAddTab={handleAddTabRequest}
@@ -1210,8 +1245,8 @@
 
   {#if shouldShowWidgetSubTabBar}
     <WidgetSubTabBar
-      widgetSubTabNames={widgetSubTabNamesForActiveTab}
-      activeWidgetSubTabName={activeWidgetSubTab.name}
+      widgetSubTabs={widgetSubTabsForActiveTab}
+      activeWidgetSubTabId={activeWidgetSubTab.id}
       onSelectWidgetSubTab={handleWidgetSubTabSelection}
     />
   {/if}

@@ -2,14 +2,12 @@ import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type VaultDashboardPlugin from "../main";
 import {
   ALL_WIDGET_IDENTIFIERS,
-  DEFAULT_ENABLED_WIDGET_IDENTIFIERS,
-  DEFAULT_WIDGET_SUB_TAB_NAME,
-  DEFAULT_WORKING_DAY_INDICES,
   WIDGET_DISPLAY_LABEL_BY_IDENTIFIER,
-  buildDefaultWidgetSubTabs,
+  buildDefaultDashboardTab,
   computeWidgetSubTabsWithWidgetAssignedTo,
+  generateStableId,
   normaliseFolderScope,
-  resolveEffectiveWidgetSubTabName,
+  resolveEffectiveWidgetSubTabId,
   type DashboardTab,
   type DayOfWeekIndex,
   type PluginSettings,
@@ -22,12 +20,12 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
 
   // Which tab accordions are open. Persisted across the re-renders that editing
   // triggers (rename, add/remove project) so the tab you are working in stays open.
-  private readonly expandedTabNames: Set<string>;
+  private readonly expandedTabIds: Set<string>;
 
   constructor(obsidianApplication: App, plugin: VaultDashboardPlugin) {
     super(obsidianApplication, plugin);
     this.plugin = plugin;
-    this.expandedTabNames = new Set([plugin.currentSettings.activeTabName]);
+    this.expandedTabIds = new Set([plugin.currentSettings.activeTabId]);
   }
 
   display(): void {
@@ -153,12 +151,12 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
       .setDesc("Which tab opens when the dashboard view is first revealed.")
       .addDropdown((dropdownControl) => {
         for (const dashboardTab of this.plugin.currentSettings.tabs) {
-          dropdownControl.addOption(dashboardTab.name, dashboardTab.name);
+          dropdownControl.addOption(dashboardTab.id, dashboardTab.name);
         }
-        dropdownControl.setValue(this.plugin.currentSettings.activeTabName);
-        dropdownControl.onChange(async (selectedTabName) => {
+        dropdownControl.setValue(this.plugin.currentSettings.activeTabId);
+        dropdownControl.onChange(async (selectedTabId) => {
           const updatedSettings = cloneSettings(this.plugin.currentSettings);
-          updatedSettings.activeTabName = selectedTabName;
+          updatedSettings.activeTabId = selectedTabId;
           await this.plugin.replaceSettings(updatedSettings);
         });
       });
@@ -171,7 +169,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
     const tabSectionContainer = parentElement.createEl("details", {
       cls: "vault-dashboard-settings-tab-section",
     });
-    tabSectionContainer.open = this.expandedTabNames.has(dashboardTab.name);
+    tabSectionContainer.open = this.expandedTabIds.has(dashboardTab.id);
 
     const tabSummary = tabSectionContainer.createEl("summary", {
       cls: "vault-dashboard-settings-tab-summary",
@@ -187,9 +185,9 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
 
     tabSectionContainer.addEventListener("toggle", () => {
       if (tabSectionContainer.open) {
-        this.expandedTabNames.add(dashboardTab.name);
+        this.expandedTabIds.add(dashboardTab.id);
       } else {
-        this.expandedTabNames.delete(dashboardTab.name);
+        this.expandedTabIds.delete(dashboardTab.id);
       }
     });
 
@@ -214,18 +212,12 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
           }
           const updatedSettings = cloneSettings(this.plugin.currentSettings);
           const editedTab = updatedSettings.tabs.find(
-            (candidateTab) => candidateTab.name === dashboardTab.name,
+            (candidateTab) => candidateTab.id === dashboardTab.id,
           );
           if (!editedTab) {
             return;
           }
-          if (updatedSettings.activeTabName === dashboardTab.name) {
-            updatedSettings.activeTabName = renamedTabName;
-          }
           editedTab.name = renamedTabName;
-          if (this.expandedTabNames.delete(dashboardTab.name)) {
-            this.expandedTabNames.add(renamedTabName);
-          }
           await this.plugin.replaceSettings(updatedSettings);
           this.display();
         });
@@ -247,7 +239,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
             .filter((trimmedEntry) => trimmedEntry.length > 0);
           const updatedSettings = cloneSettings(this.plugin.currentSettings);
           const editedTab = updatedSettings.tabs.find(
-            (candidateTab) => candidateTab.name === dashboardTab.name,
+            (candidateTab) => candidateTab.id === dashboardTab.id,
           );
           if (!editedTab) {
             return;
@@ -276,7 +268,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
           const normalisedFolderPath = normaliseFolderScope(textInput.getValue().trim());
           const updatedSettings = cloneSettings(this.plugin.currentSettings);
           const editedTab = updatedSettings.tabs.find(
-            (candidateTab) => candidateTab.name === dashboardTab.name,
+            (candidateTab) => candidateTab.id === dashboardTab.id,
           );
           if (!editedTab) {
             return;
@@ -335,10 +327,10 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
           buttonControl.onClick(async () => {
             const updatedSettings = cloneSettings(this.plugin.currentSettings);
             updatedSettings.tabs = updatedSettings.tabs.filter(
-              (candidateTab) => candidateTab.name !== dashboardTab.name,
+              (candidateTab) => candidateTab.id !== dashboardTab.id,
             );
-            if (updatedSettings.activeTabName === dashboardTab.name) {
-              updatedSettings.activeTabName = updatedSettings.tabs[0].name;
+            if (updatedSettings.activeTabId === dashboardTab.id) {
+              updatedSettings.activeTabId = updatedSettings.tabs[0].id;
             }
             await this.plugin.replaceSettings(updatedSettings);
             this.display();
@@ -369,7 +361,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
     chipButton.addEventListener("click", async () => {
       const updatedSettings = cloneSettings(this.plugin.currentSettings);
       const editedTab = updatedSettings.tabs.find(
-        (candidateTab) => candidateTab.name === dashboardTab.name,
+        (candidateTab) => candidateTab.id === dashboardTab.id,
       );
       if (!editedTab) {
         return;
@@ -414,7 +406,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
             }
             const updatedSettings = cloneSettings(this.plugin.currentSettings);
             const editedTab = updatedSettings.tabs.find(
-              (candidateTab) => candidateTab.name === dashboardTab.name,
+              (candidateTab) => candidateTab.id === dashboardTab.id,
             );
             if (!editedTab) {
               return;
@@ -422,9 +414,6 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
             const editedWidgetSubTab = editedTab.widgetSubTabs[widgetSubTabIndex];
             if (!editedWidgetSubTab) {
               return;
-            }
-            if (editedTab.activeWidgetSubTabName === editedWidgetSubTab.name) {
-              editedTab.activeWidgetSubTabName = renamedWidgetSubTabName;
             }
             editedWidgetSubTab.name = renamedWidgetSubTabName;
             await this.plugin.replaceSettings(updatedSettings);
@@ -439,7 +428,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
           buttonControl.onClick(async () => {
             const updatedSettings = cloneSettings(this.plugin.currentSettings);
             const editedTab = updatedSettings.tabs.find(
-              (candidateTab) => candidateTab.name === dashboardTab.name,
+              (candidateTab) => candidateTab.id === dashboardTab.id,
             );
             if (!editedTab || editedTab.widgetSubTabs.length <= 1) {
               return;
@@ -451,8 +440,8 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
                 fallbackWidgetSubTab.widgetIdentifiers.push(widgetIdentifier);
               }
             }
-            if (editedTab.activeWidgetSubTabName === removedWidgetSubTab.name) {
-              editedTab.activeWidgetSubTabName = fallbackWidgetSubTab.name;
+            if (editedTab.activeWidgetSubTabId === removedWidgetSubTab.id) {
+              editedTab.activeWidgetSubTabId = fallbackWidgetSubTab.id;
             }
             await this.plugin.replaceSettings(updatedSettings);
             this.display();
@@ -466,12 +455,13 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
       buttonControl.onClick(async () => {
         const updatedSettings = cloneSettings(this.plugin.currentSettings);
         const editedTab = updatedSettings.tabs.find(
-          (candidateTab) => candidateTab.name === dashboardTab.name,
+          (candidateTab) => candidateTab.id === dashboardTab.id,
         );
         if (!editedTab) {
           return;
         }
         editedTab.widgetSubTabs.push({
+          id: generateStableId(),
           name: pickNextUnusedWidgetSubTabName(editedTab),
           widgetIdentifiers: [],
         });
@@ -491,7 +481,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
     });
     this.renderWidgetToggleChip(widgetRow, dashboardTab, widgetIdentifier);
 
-    const assignedWidgetSubTabName = resolveEffectiveWidgetSubTabName(
+    const assignedWidgetSubTabId = resolveEffectiveWidgetSubTabId(
       dashboardTab,
       widgetIdentifier,
     );
@@ -502,16 +492,16 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
       const optionElement = widgetSubTabSelect.createEl("option", {
         text: widgetSubTab.name,
       });
-      optionElement.value = widgetSubTab.name;
-      if (widgetSubTab.name === assignedWidgetSubTabName) {
+      optionElement.value = widgetSubTab.id;
+      if (widgetSubTab.id === assignedWidgetSubTabId) {
         optionElement.selected = true;
       }
     }
     widgetSubTabSelect.addEventListener("change", async () => {
-      const targetWidgetSubTabName = widgetSubTabSelect.value;
+      const targetWidgetSubTabId = widgetSubTabSelect.value;
       const updatedSettings = cloneSettings(this.plugin.currentSettings);
       const editedTab = updatedSettings.tabs.find(
-        (candidateTab) => candidateTab.name === dashboardTab.name,
+        (candidateTab) => candidateTab.id === dashboardTab.id,
       );
       if (!editedTab) {
         return;
@@ -519,7 +509,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
       editedTab.widgetSubTabs = computeWidgetSubTabsWithWidgetAssignedTo(
         editedTab.widgetSubTabs,
         widgetIdentifier,
-        targetWidgetSubTabName,
+        targetWidgetSubTabId,
       );
       await this.plugin.replaceSettings(updatedSettings);
     });
@@ -558,7 +548,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
       removeProjectButton.addEventListener("click", async () => {
         const updatedSettings = cloneSettings(this.plugin.currentSettings);
         const editedTab = updatedSettings.tabs.find(
-          (candidateTab) => candidateTab.name === dashboardTab.name,
+          (candidateTab) => candidateTab.id === dashboardTab.id,
         );
         if (!editedTab) {
           return;
@@ -583,7 +573,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
             }
             const updatedSettings = cloneSettings(this.plugin.currentSettings);
             const editedTab = updatedSettings.tabs.find(
-              (candidateTab) => candidateTab.name === dashboardTab.name,
+              (candidateTab) => candidateTab.id === dashboardTab.id,
             );
             if (!editedTab) {
               return;
@@ -612,7 +602,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
             }
             const updatedSettings = cloneSettings(this.plugin.currentSettings);
             const editedTab = updatedSettings.tabs.find(
-              (candidateTab) => candidateTab.name === dashboardTab.name,
+              (candidateTab) => candidateTab.id === dashboardTab.id,
             );
             if (!editedTab) {
               return;
@@ -643,7 +633,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
               .filter((entry) => entry.length > 0);
             const updatedSettings = cloneSettings(this.plugin.currentSettings);
             const editedTab = updatedSettings.tabs.find(
-              (candidateTab) => candidateTab.name === dashboardTab.name,
+              (candidateTab) => candidateTab.id === dashboardTab.id,
             );
             if (!editedTab) {
               return;
@@ -673,7 +663,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
             }
             const updatedSettings = cloneSettings(this.plugin.currentSettings);
             const editedTab = updatedSettings.tabs.find(
-              (candidateTab) => candidateTab.name === dashboardTab.name,
+              (candidateTab) => candidateTab.id === dashboardTab.id,
             );
             if (!editedTab) {
               return;
@@ -689,7 +679,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
 
       this.renderStoredShellCommandsForPinnedProject(
         projectCard,
-        dashboardTab.name,
+        dashboardTab.id,
         pinnedProject.folderPath,
         pinnedProjectIndex,
         pinnedProject.storedShellCommands,
@@ -704,12 +694,13 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
         buttonControl.onClick(async () => {
           const updatedSettings = cloneSettings(this.plugin.currentSettings);
           const editedTab = updatedSettings.tabs.find(
-            (candidateTab) => candidateTab.name === dashboardTab.name,
+            (candidateTab) => candidateTab.id === dashboardTab.id,
           );
           if (!editedTab) {
             return;
           }
           editedTab.pinnedProjects.push({
+            id: generateStableId(),
             folderPath: "",
             displayName: "",
             manuallyAssignedContainerNames: [],
@@ -724,7 +715,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
 
   private renderStoredShellCommandsForPinnedProject(
     parentElement: HTMLElement,
-    dashboardTabName: string,
+    dashboardTabId: string,
     pinnedProjectFolderPathLabel: string,
     pinnedProjectIndex: number,
     storedShellCommands: { label: string; command: string }[],
@@ -761,7 +752,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
           labelTextInput.inputEl.addEventListener("blur", async () => {
             const updatedSettings = cloneSettings(this.plugin.currentSettings);
             const editedTab = updatedSettings.tabs.find(
-              (candidateTab) => candidateTab.name === dashboardTabName,
+              (candidateTab) => candidateTab.id === dashboardTabId,
             );
             if (!editedTab) {
               return;
@@ -784,7 +775,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
           commandTextInput.inputEl.addEventListener("blur", async () => {
             const updatedSettings = cloneSettings(this.plugin.currentSettings);
             const editedTab = updatedSettings.tabs.find(
-              (candidateTab) => candidateTab.name === dashboardTabName,
+              (candidateTab) => candidateTab.id === dashboardTabId,
             );
             if (!editedTab) {
               return;
@@ -807,7 +798,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
           buttonControl.onClick(async () => {
             const updatedSettings = cloneSettings(this.plugin.currentSettings);
             const editedTab = updatedSettings.tabs.find(
-              (candidateTab) => candidateTab.name === dashboardTabName,
+              (candidateTab) => candidateTab.id === dashboardTabId,
             );
             if (!editedTab) {
               return;
@@ -829,7 +820,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
         buttonControl.onClick(async () => {
           const updatedSettings = cloneSettings(this.plugin.currentSettings);
           const editedTab = updatedSettings.tabs.find(
-            (candidateTab) => candidateTab.name === dashboardTabName,
+            (candidateTab) => candidateTab.id === dashboardTabId,
           );
           if (!editedTab) {
             return;
@@ -866,7 +857,7 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
         buttonControl.onClick(async () => {
           const updatedSettings = cloneSettings(this.plugin.currentSettings);
           const editedTab = updatedSettings.tabs.find(
-            (candidateTab) => candidateTab.name === dashboardTab.name,
+            (candidateTab) => candidateTab.id === dashboardTab.id,
           );
           if (!editedTab) {
             return;
@@ -934,18 +925,9 @@ export class VaultDashboardSettingsTab extends PluginSettingTab {
         buttonControl.setButtonText("+ Add tab");
         buttonControl.onClick(async () => {
           const updatedSettings = cloneSettings(this.plugin.currentSettings);
-          const newTabName = pickNextUnusedTabName(updatedSettings);
-          updatedSettings.tabs.push({
-            name: newTabName,
-            folderScopes: [],
-            dailyNoteFolderPath: "",
-            workingDayIndices: [...DEFAULT_WORKING_DAY_INDICES],
-            enabledWidgets: [...DEFAULT_ENABLED_WIDGET_IDENTIFIERS],
-            collapsedWidgetIdentifiers: [],
-            pinnedProjects: [],
-            widgetSubTabs: buildDefaultWidgetSubTabs(),
-            activeWidgetSubTabName: DEFAULT_WIDGET_SUB_TAB_NAME,
-          });
+          updatedSettings.tabs.push(
+            buildDefaultDashboardTab(pickNextUnusedTabName(updatedSettings)),
+          );
           await this.plugin.replaceSettings(updatedSettings);
           this.display();
         });
@@ -1035,8 +1017,9 @@ function pickNextUnusedWidgetSubTabName(tab: DashboardTab): string {
 
 function cloneSettings(settings: PluginSettings): PluginSettings {
   return {
-    activeTabName: settings.activeTabName,
+    activeTabId: settings.activeTabId,
     tabs: settings.tabs.map((dashboardTab) => ({
+      id: dashboardTab.id,
       name: dashboardTab.name,
       folderScopes: [...dashboardTab.folderScopes],
       dailyNoteFolderPath: dashboardTab.dailyNoteFolderPath,
@@ -1044,6 +1027,7 @@ function cloneSettings(settings: PluginSettings): PluginSettings {
       enabledWidgets: [...dashboardTab.enabledWidgets],
       collapsedWidgetIdentifiers: [...dashboardTab.collapsedWidgetIdentifiers],
       pinnedProjects: dashboardTab.pinnedProjects.map((pinnedProject) => ({
+        id: pinnedProject.id,
         folderPath: pinnedProject.folderPath,
         displayName: pinnedProject.displayName,
         manuallyAssignedContainerNames: [...pinnedProject.manuallyAssignedContainerNames],
@@ -1054,17 +1038,18 @@ function cloneSettings(settings: PluginSettings): PluginSettings {
         jiraProjectKey: pinnedProject.jiraProjectKey,
       })),
       widgetSubTabs: dashboardTab.widgetSubTabs.map((widgetSubTab) => ({
+        id: widgetSubTab.id,
         name: widgetSubTab.name,
         widgetIdentifiers: [...widgetSubTab.widgetIdentifiers],
       })),
-      activeWidgetSubTabName: dashboardTab.activeWidgetSubTabName,
+      activeWidgetSubTabId: dashboardTab.activeWidgetSubTabId,
     })),
     workspaceStartup: { ...settings.workspaceStartup },
     dailyTaskReminder: { ...settings.dailyTaskReminder },
     procrastIdeaFolderMappings: settings.procrastIdeaFolderMappings.map((mapping) => ({
       ideaUuid: mapping.ideaUuid,
       targetFolderPath: mapping.targetFolderPath,
-      tabName: mapping.tabName,
+      tabId: mapping.tabId,
       createdAt: mapping.createdAt,
       ideaTitle: mapping.ideaTitle,
     })),

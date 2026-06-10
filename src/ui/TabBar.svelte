@@ -1,42 +1,44 @@
 <script lang="ts">
-  export let tabNames: string[] = ["Work", "Private"];
-  export let activeTabName: string = "Work";
+  type TabBarEntry = { id: string; name: string };
+
+  export let tabs: TabBarEntry[] = [];
+  export let activeTabId: string = "";
   export let areAllWidgetsCollapsed: boolean = false;
-  export let onSelectTab: (tabName: string) => void = () => {};
+  export let onSelectTab: (tabId: string) => void = () => {};
   export let onAddTab: () => void = () => {};
   export let onToggleCollapseAllWidgets: () => void = () => {};
   export let onRefreshAllWidgets: () => void = () => {};
   export let onOpenSettings: () => void = () => {};
 
-  function isActiveTab(tabName: string): boolean {
-    return tabName === activeTabName;
+  function isActiveTab(tabId: string): boolean {
+    return tabId === activeTabId;
   }
 
-  function formatTabLabelForDisplay(tabName: string): string {
-    if (isActiveTab(tabName)) {
-      return tabName.toUpperCase();
+  function formatTabLabelForDisplay(tab: TabBarEntry): string {
+    if (isActiveTab(tab.id)) {
+      return tab.name.toUpperCase();
     }
-    return tabName.toLowerCase();
+    return tab.name.toLowerCase();
   }
 </script>
 
 <nav class="tab-bar" aria-label="Dashboard tabs">
   <ul class="tab-list" role="tablist">
-    {#each tabNames as tabName}
+    {#each tabs as tab (tab.id)}
       <li class="tab-list-item">
         <button
           type="button"
           class="tab-button"
-          class:is-active={isActiveTab(tabName)}
+          class:is-active={isActiveTab(tab.id)}
           role="tab"
-          aria-selected={isActiveTab(tabName)}
-          on:click={() => onSelectTab(tabName)}
+          aria-selected={isActiveTab(tab.id)}
+          on:click={() => onSelectTab(tab.id)}
         >
-          {#if isActiveTab(tabName)}
+          {#if isActiveTab(tab.id)}
             <span class="tab-bracket" aria-hidden="true">[</span>
           {/if}
-          {formatTabLabelForDisplay(tabName)}
-          {#if isActiveTab(tabName)}
+          {formatTabLabelForDisplay(tab)}
+          {#if isActiveTab(tab.id)}
             <span class="tab-bracket" aria-hidden="true">]</span>
           {/if}
         </button>
