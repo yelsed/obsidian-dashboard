@@ -92,7 +92,14 @@
 
 </script>
 
-<WidgetPanel title="Procrast ideas" {isCollapsed} {onToggleCollapsed}>
+<WidgetPanel
+  title="Procrast ideas"
+  summary={procrastSnapshot.availability === "available" && procrastSnapshot.ideas.length > 0
+    ? `${procrastSnapshot.ideas.length} open`
+    : ""}
+  {isCollapsed}
+  {onToggleCollapsed}
+>
   <button slot="header-actions" type="button" class="procrast-refresh-button" on:click={onRefresh}>refresh</button>
 
   {#if viewState === "available"}

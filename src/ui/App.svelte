@@ -50,6 +50,11 @@
     fetchJiraIssueDetail,
     buildClaudePromptForJiraIssue,
   } from "../data/jira";
+  import {
+    createGitHubActionsStore,
+    type TrackedGitHubProject,
+  } from "../data/githubActions";
+  import { announceToUser } from "../data/desktopNotification";
   import { openPlanProcrastIdeaFlow } from "./PlanProcrastIdeaModal";
   import { confirmMarkProcrastIdeaDone } from "./ConfirmProcrastIdeaDoneModal";
   import { ProcrastIdeaDetailsModal } from "./ProcrastIdeaDetailsModal";
@@ -100,6 +105,7 @@
   const projectShellCommandsStore = createProjectShellCommandsStore();
   const procrastIdeasStore = createProcrastIdeasStore();
   const jiraIssuesStore = createJiraIssuesStore();
+  const gitHubActionsStore = createGitHubActionsStore();
 
   const recentlyModifiedFilesData = recentlyModifiedFilesStore.store;
   const openTasksData = openTasksStore.store;
@@ -111,6 +117,8 @@
   const shellCommandRunsForWidgetData = projectShellCommandsStore.store;
   const procrastIdeasSnapshotData = procrastIdeasStore.store;
   const jiraSnapshotData = jiraIssuesStore.store;
+  const gitHubActionsSnapshotsData = gitHubActionsStore.store;
+  const gitHubRunCompletionEventsData = gitHubActionsStore.runCompletionEvents;
 
   let selectedPinnedProjectIdForDetail: string | null = null;
   let hasRequestedInitialProcrastIdeasRefresh = false;
@@ -142,13 +150,37 @@
   );
   jiraIssuesStore.startPolling();
 
+  gitHubActionsStore.setTrackedProjects(
+    buildTrackedGitHubProjectsFromPinnedProjects(initialActiveTab.pinnedProjects),
+  );
+  gitHubActionsStore.startPolling();
+
   const unsubscribeDockerSnapshot = dockerSnapshotData.subscribe((dockerSnapshot) => {
     pinnedProjectsStore.setDockerSnapshot(dockerSnapshot);
   });
 
+  const unsubscribeGitHubRunCompletionEvents = gitHubRunCompletionEventsData.subscribe(
+    (runCompletionEvent) => {
+      if (runCompletionEvent === null) {
+        return;
+      }
+      const { finishedRun, projectDisplayName } = runCompletionEvent;
+      announceToUser(
+        `${finishedRun.workflowName} ${finishedRun.runConclusion ?? "completed"}`,
+        `on ${finishedRun.headBranchName} · ${projectDisplayName}`,
+      );
+    },
+  );
+
   const unsubscribeJiraSnapshot = jiraSnapshotData.subscribe((jiraSnapshot) => {
     pinnedProjectsStore.setJiraSnapshot(jiraSnapshot);
   });
+
+  const unsubscribeGitHubActionsSnapshots = gitHubActionsSnapshotsData.subscribe(
+    (gitHubActionsSnapshots) => {
+      pinnedProjectsStore.setGitHubActionsSnapshots(gitHubActionsSnapshots);
+    },
+  );
 
   let hasReceivedInitialRefreshSignal = false;
   const unsubscribeRefreshSignal = refreshSignalStore.subscribe(() => {
@@ -272,6 +304,19 @@
     jiraIssuesStore.setProjectKeysToQuery(activeJiraProjectKeys);
   }
 
+  $: trackedGitHubProjects = buildTrackedGitHubProjectsFromPinnedProjects(activePinnedProjectsConfig);
+  $: trackedGitHubProjectsKey = trackedGitHubProjects
+    .map((trackedProject) =>
+      [trackedProject.pinnedProjectId, trackedProject.folderPath, trackedProject.displayName].join("::"),
+    )
+    .join("\n");
+
+  let lastAppliedTrackedGitHubProjectsKey: string = trackedGitHubProjectsKey;
+  $: if (trackedGitHubProjectsKey !== lastAppliedTrackedGitHubProjectsKey) {
+    lastAppliedTrackedGitHubProjectsKey = trackedGitHubProjectsKey;
+    gitHubActionsStore.setTrackedProjects(trackedGitHubProjects);
+  }
+
   let lastAppliedProcrastIdeaFolderMappingsKey: string = activeProcrastIdeaFolderMappingsKey;
   $: if (activeProcrastIdeaFolderMappingsKey !== lastAppliedProcrastIdeaFolderMappingsKey) {
     lastAppliedProcrastIdeaFolderMappingsKey = activeProcrastIdeaFolderMappingsKey;
@@ -303,6 +348,8 @@
   onDestroy(() => {
     unsubscribeDockerSnapshot();
     unsubscribeJiraSnapshot();
+    unsubscribeGitHubActionsSnapshots();
+    unsubscribeGitHubRunCompletionEvents();
     unsubscribeRefreshSignal();
     recentlyModifiedFilesStore.destroy();
     openTasksStore.destroy();
@@ -314,6 +361,7 @@
     projectShellCommandsStore.destroy();
     procrastIdeasStore.destroy();
     jiraIssuesStore.destroy();
+    gitHubActionsStore.destroy();
   });
 
   function isWidgetEnabledForActiveTab(widgetIdentifier: WidgetIdentifier): boolean {
@@ -388,6 +436,7 @@
       void procrastIdeasStore.refresh();
     }
     jiraIssuesStore.refreshNow();
+    gitHubActionsStore.refreshNow();
   }
 
   function handleRefreshAllWidgetsRequest(): void {
@@ -400,6 +449,45 @@
 
   function handleOpenJiraIssueInBrowser(issueBrowserUrl: string): void {
     void shell.openExternal(issueBrowserUrl);
+  }
+
+  function buildTrackedGitHubProjectsFromPinnedProjects(
+    pinnedProjects: DashboardTab["pinnedProjects"],
+  ): TrackedGitHubProject[] {
+    return pinnedProjects
+      .filter((pinnedProject) => pinnedProject.folderPath.trim().length > 0)
+      .map((pinnedProject) => ({
+        pinnedProjectId: pinnedProject.id,
+        displayName: pinnedProject.displayName,
+        folderPath: pinnedProject.folderPath,
+      }));
+  }
+
+  function handleRefreshGitHubActions(): void {
+    gitHubActionsStore.refreshNow();
+  }
+
+  function handleDispatchGitHubWorkflow(
+    pinnedProjectId: string,
+    workflowFilePath: string,
+    branchName: string,
+  ): void {
+    void gitHubActionsStore.dispatchWorkflow(pinnedProjectId, workflowFilePath, branchName);
+  }
+
+  function handleRerunFailedGitHubJobs(pinnedProjectId: string, runDatabaseId: number): void {
+    void gitHubActionsStore.rerunFailedJobsOfRun(pinnedProjectId, runDatabaseId);
+  }
+
+  function handleCancelGitHubRun(pinnedProjectId: string, runDatabaseId: number): void {
+    void gitHubActionsStore.cancelRun(pinnedProjectId, runDatabaseId);
+  }
+
+  function handleOpenGitHubRunInBrowser(runBrowserUrl: string): void {
+    if (runBrowserUrl.length === 0) {
+      return;
+    }
+    void shell.openExternal(runBrowserUrl);
   }
 
   function resolvePinnedProjectForWidgetById(pinnedProjectId: string) {
@@ -1297,6 +1385,11 @@
       onCollectOpenTasksIntoProjectGoals={handleCollectOpenTasksIntoProjectGoals}
       onOpenJiraIssueInBrowser={handleOpenJiraIssueInBrowser}
       onStartClaudeSessionFromJiraIssue={handleStartClaudeSessionFromJiraIssue}
+      onRefreshGitHubActions={handleRefreshGitHubActions}
+      onDispatchGitHubWorkflow={handleDispatchGitHubWorkflow}
+      onRerunFailedGitHubJobs={handleRerunFailedGitHubJobs}
+      onCancelGitHubRun={handleCancelGitHubRun}
+      onOpenGitHubRunInBrowser={handleOpenGitHubRunInBrowser}
     />
   {:else}
     <main class="widget-grid">

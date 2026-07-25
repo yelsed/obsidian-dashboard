@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { formatRelativeModifiedTime } from "../../data/format";
   import type { FreshnessLevel, PinnedProjectForWidget, ProcrastOriginForWidget } from "../../data/pinnedProjects";
+  import { isRunFinished, type WorkflowRunSummary } from "../../data/githubActions";
   import WidgetPanel from "./WidgetPanel.svelte";
 
   type WidgetViewState = "data" | "loading" | "empty" | "error";
@@ -53,13 +53,83 @@
     return countRunningContainersIn(project) > 0;
   }
 
-  function shouldShowJiraBadgeFor(project: PinnedProjectForWidget): boolean {
-    return project.jiraProjectKey.length > 0 && project.jiraAvailability === "available";
+  function resolveMostRecentWorkflowRunFor(
+    project: PinnedProjectForWidget,
+  ): WorkflowRunSummary | null {
+    const snapshot = project.gitHubActionsSnapshot;
+    if (snapshot === null || snapshot.availability !== "available") {
+      return null;
+    }
+    return snapshot.recentRuns[0] ?? null;
   }
 
-  function describeJiraBadgeFor(project: PinnedProjectForWidget): string {
-    const issueWord = project.jiraOpenIssueCount === 1 ? "issue" : "issues";
-    return `${project.jiraOpenIssueCount} open Jira ${issueWord} in ${project.jiraProjectKey}`;
+  function describeWorkflowRunGlyph(mostRecentRun: WorkflowRunSummary): string {
+    if (!isRunFinished(mostRecentRun)) {
+      return "◐";
+    }
+    if (mostRecentRun.runConclusion === "success") {
+      return "✓";
+    }
+    if (mostRecentRun.runConclusion === "cancelled" || mostRecentRun.runConclusion === "skipped") {
+      return "⊘";
+    }
+    return "✗";
+  }
+
+  function describeWorkflowRunOutcomeCategory(mostRecentRun: WorkflowRunSummary): string {
+    if (!isRunFinished(mostRecentRun)) {
+      return "active";
+    }
+    if (mostRecentRun.runConclusion === "success") {
+      return "success";
+    }
+    if (mostRecentRun.runConclusion === "cancelled" || mostRecentRun.runConclusion === "skipped") {
+      return "neutral";
+    }
+    return "failure";
+  }
+
+  function describeWorkflowRunTooltip(mostRecentRun: WorkflowRunSummary): string {
+    const outcome = isRunFinished(mostRecentRun)
+      ? (mostRecentRun.runConclusion ?? "completed").replace("_", " ")
+      : "running";
+    return `${mostRecentRun.workflowName} ${outcome} on ${mostRecentRun.headBranchName}`;
+  }
+
+  // Whichever of these is true is the reason to look at this panel right now, so the header
+  // states it instead of making the reader scan every row for a red glyph.
+  $: pinnedProjectsSummary =
+    viewState !== "data" || pinnedProjects.length === 0
+      ? ""
+      : [
+          `${pinnedProjects.length} pinned`,
+          countProjectsWithRunningContainers(pinnedProjects) > 0
+            ? `${countProjectsWithRunningContainers(pinnedProjects)} running`
+            : null,
+          countProjectsWithFailingWorkflow(pinnedProjects) > 0
+            ? `${countProjectsWithFailingWorkflow(pinnedProjects)} ci failing`
+            : null,
+        ]
+          .filter((onePart) => onePart !== null)
+          .join(" · ");
+
+  function countProjectsWithRunningContainers(
+    projects: PinnedProjectForWidget[],
+  ): number {
+    return projects.filter((project) => countRunningContainersIn(project) > 0).length;
+  }
+
+  function countProjectsWithFailingWorkflow(projects: PinnedProjectForWidget[]): number {
+    return projects.filter((project) => {
+      const mostRecentRun = resolveMostRecentWorkflowRunFor(project);
+      return (
+        mostRecentRun !== null &&
+        isRunFinished(mostRecentRun) &&
+        mostRecentRun.runConclusion !== "success" &&
+        mostRecentRun.runConclusion !== "cancelled" &&
+        mostRecentRun.runConclusion !== "skipped"
+      );
+    }).length;
   }
 
   function formatShortIdeaUuid(ideaUuid: string): string {
@@ -74,13 +144,30 @@
   }
 </script>
 
-<WidgetPanel title="Pinned projects" {isCollapsed} {onToggleCollapsed}>
+<WidgetPanel
+  title="Pinned projects"
+  summary={pinnedProjectsSummary}
+  {isCollapsed}
+  {onToggleCollapsed}
+>
   {#if viewState === "data"}
     {#if pinnedProjects.length === 0}
       <div class="project-empty-state">No pinned projects yet.</div>
     {:else}
+      <!-- The data rows are buttons carrying their own aria-labels, so this header is a visual
+           legend only; announcing it again would just repeat what each row already says. -->
+      <div class="project-column-header" aria-hidden="true">
+        <span class="project-column-name">project</span>
+        <span class="project-summary-meta">
+          <span class="project-column-label project-column-label-docker">docker</span>
+          <span class="project-column-label">ci</span>
+          <span class="project-column-label project-column-label-age">last edit</span>
+          <span class="project-column-label"></span>
+        </span>
+      </div>
       <ul class="project-summary-list">
         {#each pinnedProjects as project (project.id)}
+          {@const mostRecentWorkflowRun = resolveMostRecentWorkflowRunFor(project)}
           <li class="project-summary-item">
             <button
               type="button"
@@ -93,22 +180,21 @@
                 {#if project.displayName && project.displayName !== project.folderPath}
                   <span class="project-folder-path">{project.folderPath}</span>
                 {/if}
-              </span>
-              <span class="project-summary-meta">
-                <span class="project-container-bar" aria-label={describeContainerStatusFor(project)}>[<span class="project-container-bar-cells" class:is-pulsing={hasAtLeastOneRunningContainer(project)}>{renderContainerBarFor(project)}</span>]</span>
-                <span class="project-container-status">{describeContainerStatusFor(project)}</span>
-                {#if shouldShowJiraBadgeFor(project)}
-                  <span class="project-jira-badge" title={describeJiraBadgeFor(project)}>jira {project.jiraOpenIssueCount}</span>
-                {/if}
-                <span class="project-freshness" data-freshness={project.freshnessLevel} aria-label="Last modified {project.relativeModifiedTimeLabel}">{chooseFreshnessGlyphFor(project)}</span>
-                <span class="project-modified-time">{project.relativeModifiedTimeLabel}</span>
-                <span class="project-note-count">{project.markdownFileCount} {project.markdownFileCount === 1 ? "note" : "notes"}</span>
-                {#if project.lastClaudeSessionLastActivityAtMilliseconds !== null}
-                  <span class="project-claude-indicator" title="Last Claude Code session in this folder">claude {formatRelativeModifiedTime(project.lastClaudeSessionLastActivityAtMilliseconds)}</span>
-                {/if}
                 {#if project.procrastOrigin}
                   <span class="project-origin-badge" title={describeProcrastOrigin(project.procrastOrigin)}>from Procrast {formatShortIdeaUuid(project.procrastOrigin.ideaUuid)}</span>
                 {/if}
+              </span>
+              <!-- Every cell is rendered on every row, empty when a project has nothing to say for
+                   it. A conditional cell would collapse its track and shift each row's remaining
+                   signals sideways, which is what made this a run-on string rather than a table. -->
+              <span class="project-summary-meta">
+                <span class="project-container-bar" aria-label={describeContainerStatusFor(project)}>[<span class="project-container-bar-cells" class:is-pulsing={hasAtLeastOneRunningContainer(project)}>{renderContainerBarFor(project)}</span>]</span>
+                <span class="project-container-status">{describeContainerStatusFor(project)}</span>
+                <span class="project-workflow-badge" data-outcome={mostRecentWorkflowRun === null ? "none" : describeWorkflowRunOutcomeCategory(mostRecentWorkflowRun)} title={mostRecentWorkflowRun === null ? "" : describeWorkflowRunTooltip(mostRecentWorkflowRun)}>
+                  {mostRecentWorkflowRun === null ? "" : `${describeWorkflowRunGlyph(mostRecentWorkflowRun)} ci`}
+                </span>
+                <span class="project-freshness" data-freshness={project.freshnessLevel} aria-label="Last modified {project.relativeModifiedTimeLabel}">{chooseFreshnessGlyphFor(project)}</span>
+                <span class="project-modified-time">{project.relativeModifiedTimeLabel}</span>
                 <span class="project-detail-link">detail ▸</span>
               </span>
             </button>
@@ -146,8 +232,48 @@
     padding: 0;
   }
 
+  /* Mirrors the data row's outer grid and horizontal padding exactly, so each label sits over the
+     column it names. Without this the row is a line of glyphs you have to already know how to read. */
+  .project-column-header {
+    display: grid;
+    grid-template-columns: minmax(22ch, 1fr) minmax(0, auto);
+    align-items: baseline;
+    column-gap: var(--vault-dashboard-space-panel-inner);
+    padding: 0 var(--vault-dashboard-space-inline) var(--vault-dashboard-space-row);
+    margin-bottom: var(--vault-dashboard-space-row);
+    /* Transparent side borders so the header's content box is inset exactly as far as the data
+       row's, which carries a real border. */
+    border: var(--vault-dashboard-border-width) solid transparent;
+    border-bottom-color: var(--vault-dashboard-border-color-default);
+    box-sizing: border-box;
+  }
+
+  .project-column-name,
+  .project-column-label {
+    color: var(--vault-dashboard-text-faint);
+    font-size: var(--vault-dashboard-font-size-label);
+    text-transform: uppercase;
+    letter-spacing: var(--vault-dashboard-letter-spacing-uppercase);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .project-column-label {
+    text-align: right;
+  }
+
+  /* The container bar and its status word are one idea, as are the freshness dot and the age. */
+  .project-column-label-docker,
+  .project-column-label-age {
+    grid-column: span 2;
+  }
+
   .project-summary-row {
     width: 100%;
+    /* `all: unset` in styles.css resets box-sizing to content-box, so `width: 100%` plus padding
+       and border made this button 26px wider than the list item holding it — the row overflowed
+       the panel and the trailing column was pushed past its right edge. */
+    box-sizing: border-box;
     display: grid;
     grid-template-columns: minmax(22ch, 1fr) minmax(0, auto);
     align-items: center;
@@ -183,39 +309,59 @@
     gap: 0.1rem;
   }
 
+  /* Fixed tracks, sized to the widest value each signal can hold, so containers sit above
+     containers and timestamps above timestamps down the whole list. */
   .project-summary-meta {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    /* Sized in ch, but the last track carries a "▸" and box-drawing glyphs are wider than one
+       character cell in most monospace fallbacks, so it gets headroom rather than exact ch math. */
+    grid-template-columns: 7ch 9ch 5ch 2ch 6ch 12ch;
     align-items: baseline;
-    justify-content: flex-end;
+    justify-content: end;
     gap: var(--vault-dashboard-space-row) var(--vault-dashboard-space-inline);
     min-width: 0;
     color: var(--vault-dashboard-text-secondary);
+  }
+
+  .project-summary-meta > * {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .project-container-status,
+  .project-modified-time,
+  .project-workflow-badge {
+    text-align: right;
+  }
+
+  .project-detail-link {
+    text-align: right;
   }
 
   .project-display-name,
   .project-folder-path,
   .project-container-status,
   .project-modified-time,
-  .project-note-count,
-  .project-claude-indicator,
   .project-origin-badge,
-  .project-detail-link,
-  .project-jira-badge {
+  .project-detail-link {
     white-space: nowrap;
   }
 
-  .project-display-name {
+  /* Both lines must truncate, not just the name: a deep folder path is longer than the display
+     name and would otherwise run underneath the meta column on the right. */
+  .project-display-name,
+  .project-folder-path {
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .project-display-name {
     font-weight: 700;
   }
 
   .project-folder-path,
   .project-container-status,
   .project-modified-time,
-  .project-note-count,
-  .project-claude-indicator,
   .project-origin-badge {
     color: var(--vault-dashboard-text-secondary);
     font-style: italic;
@@ -241,7 +387,27 @@
     color: var(--vault-dashboard-color-freshness-cold);
   }
 
-  .project-jira-badge,
+  .project-workflow-badge {
+    white-space: nowrap;
+    font-weight: var(--vault-dashboard-font-weight-bold);
+  }
+
+  .project-workflow-badge[data-outcome="success"] {
+    color: var(--vault-dashboard-color-status-running);
+  }
+
+  .project-workflow-badge[data-outcome="failure"] {
+    color: var(--vault-dashboard-color-status-stopped);
+  }
+
+  .project-workflow-badge[data-outcome="active"] {
+    color: var(--vault-dashboard-color-freshness-cooling);
+  }
+
+  .project-workflow-badge[data-outcome="neutral"] {
+    color: var(--vault-dashboard-text-faint);
+  }
+
   .project-detail-link {
     color: var(--vault-dashboard-text-accent);
     font-weight: var(--vault-dashboard-font-weight-bold);
@@ -286,19 +452,30 @@
       align-items: start;
     }
 
+    /* Once the signals wrap, there are no columns left for the labels to sit above, and a header
+       pointing at nothing is worse than none. */
+    .project-column-header {
+      display: none;
+    }
+
+    /* Six fixed tracks do not fit a narrow pane, so below this width the signals wrap as a
+       flow again. Alignment is worth less than legibility once the row has to break anyway. */
     .project-summary-meta {
+      display: flex;
+      flex-wrap: wrap;
       justify-content: flex-start;
+    }
+
+    .project-summary-meta > :empty {
+      display: none;
     }
 
     .project-display-name,
     .project-folder-path,
     .project-container-status,
     .project-modified-time,
-    .project-note-count,
-    .project-claude-indicator,
     .project-origin-badge,
-    .project-detail-link,
-    .project-jira-badge {
+    .project-detail-link {
       white-space: normal;
     }
   }

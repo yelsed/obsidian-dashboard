@@ -10,6 +10,7 @@ import type {
 } from "../settings";
 import type { DockerContainerSummary, DockerSnapshot } from "./docker";
 import type { JiraAvailability, JiraIssueSummary, JiraSnapshot } from "./jira";
+import type { GitHubProjectActionsSnapshot } from "./githubActions";
 import {
   readRecentClaudeSessionsForProject,
   type ClaudeSessionSummary,
@@ -68,6 +69,9 @@ export type PinnedProjectForWidget = {
   jiraAvailability: JiraAvailability;
   jiraOpenIssueCount: number;
   jiraIssuesForProject: JiraIssueSummary[];
+  // Null when the project folder is not a GitHub repository, which is also how the widget
+  // decides to show no continuous integration state at all rather than an empty one.
+  gitHubActionsSnapshot: GitHubProjectActionsSnapshot | null;
 };
 
 export type { ClaudeSessionSummary } from "./claudeSessions";
@@ -77,6 +81,9 @@ export type PinnedProjectsStore = {
   setPinnedProjectsConfig: (pinnedProjectsConfig: PinnedProjectConfig[]) => void;
   setDockerSnapshot: (dockerSnapshot: DockerSnapshot) => void;
   setJiraSnapshot: (jiraSnapshot: JiraSnapshot) => void;
+  setGitHubActionsSnapshots: (
+    gitHubActionsSnapshots: GitHubProjectActionsSnapshot[],
+  ) => void;
   setProcrastIdeaFolderMappings: (
     procrastIdeaFolderMappings: ProcrastIdeaFolderMapping[],
   ) => void;
@@ -138,6 +145,7 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
     lastErrorMessage: null,
     lastRefreshedAtEpochMilliseconds: null,
   };
+  let gitHubActionsSnapshotByPinnedProjectId = new Map<string, GitHubProjectActionsSnapshot>();
   let currentProcrastIdeaFolderMappings: ProcrastIdeaFolderMapping[] = [];
   const filesystemSnapshotByAbsoluteFolderPath = new Map<string, CachedProjectFilesystemSnapshot>();
   const recentClaudeSessionsByAbsoluteFolderPath = new Map<string, ClaudeSessionSummary[]>();
@@ -238,6 +246,7 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
       jiraAvailability: currentJiraSnapshot.jiraAvailability,
       jiraOpenIssueCount,
       jiraIssuesForProject,
+      gitHubActionsSnapshot: gitHubActionsSnapshotByPinnedProjectId.get(projectConfig.id) ?? null,
     };
   }
 
@@ -297,6 +306,15 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
     publishCurrentWidgetSnapshot();
   }
 
+  function setGitHubActionsSnapshots(
+    gitHubActionsSnapshots: GitHubProjectActionsSnapshot[],
+  ): void {
+    gitHubActionsSnapshotByPinnedProjectId = new Map(
+      gitHubActionsSnapshots.map((snapshot) => [snapshot.pinnedProjectId, snapshot] as const),
+    );
+    publishCurrentWidgetSnapshot();
+  }
+
   function setJiraSnapshot(jiraSnapshot: JiraSnapshot): void {
     currentJiraSnapshot = jiraSnapshot;
     publishCurrentWidgetSnapshot();
@@ -326,6 +344,7 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
     setPinnedProjectsConfig,
     setDockerSnapshot,
     setJiraSnapshot,
+    setGitHubActionsSnapshots,
     setProcrastIdeaFolderMappings,
     destroy,
   };

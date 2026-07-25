@@ -47,7 +47,14 @@
   $: peakTagCount = topTags.length > 0 ? Math.max(...topTags.map((tag) => tag.noteCount)) : 0;
 </script>
 
-<WidgetPanel title="Tags + folders" {isCollapsed} {onToggleCollapsed}>
+<WidgetPanel
+  title="Tags + folders"
+  summary={viewState === "data"
+    ? `${topTags.length} tags · ${untaggedNoteCount} untagged`
+    : ""}
+  {isCollapsed}
+  {onToggleCollapsed}
+>
   {#if viewState === "data"}
     <div class="subgroup">
       <h3 class="subgroup-heading">Tags</h3>
@@ -154,8 +161,11 @@
     outline-offset: 2px;
   }
 
+  /* These bars are a magnitude comparison, not an action or a selection. Rendering them in the
+     interactive accent made the loudest thing on the dashboard a tag histogram, and left real
+     affordances competing with it. */
   .row-bar {
-    color: var(--vault-dashboard-color-accent-blue);
+    color: var(--vault-dashboard-text-faint);
     letter-spacing: -0.05em;
     overflow: hidden;
     white-space: nowrap;

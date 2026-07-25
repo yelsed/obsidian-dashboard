@@ -86,7 +86,12 @@
   }
 </script>
 
-<WidgetPanel title="Claude sessions" {isCollapsed} {onToggleCollapsed}>
+<WidgetPanel
+  title="Claude sessions"
+  summary={flattenedRecentSessions.length > 0 ? `${flattenedRecentSessions.length} recent` : ""}
+  {isCollapsed}
+  {onToggleCollapsed}
+>
   {#if flattenedRecentSessions.length === 0}
     <p class="widget-empty">No Claude sessions in pinned projects yet.</p>
   {:else}

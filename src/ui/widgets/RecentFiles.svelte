@@ -25,7 +25,14 @@
   export let onSelectFile: (fileName: string) => void = () => {};
 </script>
 
-<WidgetPanel title="Recent files" {isCollapsed} {onToggleCollapsed}>
+<WidgetPanel
+  title="Recent files"
+  summary={viewState === "data"
+    ? `${recentlyModifiedFiles.length} / ${totalRecentlyModifiedCount} in ${recencyWindowLabel}`
+    : ""}
+  {isCollapsed}
+  {onToggleCollapsed}
+>
   {#if viewState === "data"}
     <ul class="row-list">
       {#each recentlyModifiedFiles as fileEntry}

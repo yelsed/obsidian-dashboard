@@ -58,6 +58,31 @@ vault-dashboard:plan-procrast-idea   # args: idea UUID, target folder path
 
 This is the integration surface for `pablo-mano/Obsidian-CLI-skill` to drive everything end-to-end from a Claude Code session.
 
+### GitHub Actions
+
+GitHub Actions ships as **part of pinned projects**, not as a widget of its own. Every pinned project whose folder is a git repository is polled by running `gh` with that folder as the working directory, so the repository resolves from the git remote and there is no repository setting to keep in sync.
+
+- The **pinned projects summary row** carries a `✓ ci` / `✗ ci` / `◐ ci` glyph for the most recent run, next to the Docker bar and the Jira badge.
+- The **project detail page** gets a `GitHub Actions` section: recent runs, a branch → workflow → run dispatch row, re-run failed jobs, cancel an in-progress run, and open a run on github.com.
+- A finished run raises an Obsidian notice plus a desktop notification.
+
+Projects whose folder is not a GitHub repository show nothing at all — no glyph on the row, and the detail section says so in one line.
+
+Deliberately left out, in rough priority order should they earn the build time:
+
+- **`workflow_dispatch` inputs.** Only workflows whose inputs are all optional can be dispatched today. Add `-f key=value` fields to the dispatch row when a workflow that needs them exists.
+- **In-widget logs.** `gh run view --log-failed` in an expandable row, instead of sending the user to the browser.
+- **Repositories that are not pinned projects.** Watching a repository you have not cloned would need an explicit `owner/name` list in settings.
+- **Branch list freshness.** Branches and workflows refresh on the first poll, every tenth poll, and on manual refresh. A branch pushed seconds ago may need one refresh click before it appears in the dropdown.
+- **More than 100 branches.** GraphQL caps a ref page at 100, so a busier repository shows only its 100 most recently committed branches. The picker says so rather than implying the list is complete; paginating is the fix if it ever bites.
+
+Edge cases that are handled, so nobody re-discovers them the hard way:
+
+- **Rate limiting is its own state.** GitHub reports a spent rate limit as HTTP 403, which naively reads as "logged out". It is classified before the credentials check so the user is not sent to re-authenticate for a problem only time fixes.
+- **Outcome labels are deliberately terse.** GitHub's vocabulary runs to fifteen characters (`action_required`, `startup_failure`); the widget maps them into nine so they cannot collide with the timestamp column.
+- **Run actions are guarded per run id**, not by one panel-wide flag, so re-running one run neither blocks another nor fires `gh` twice on a double click.
+- **`gh` stderr is clamped to three lines** with the full text in the title attribute. A DNS failure returns several sentences and two URLs, which would otherwise push the run list off screen.
+
 ### Workspace layout setup
 
 - A "Setup workspace" command opens the dashboard in the main pane and the Claude Code terminal in the right sidebar, then offers to save the result as the startup layout.
@@ -84,7 +109,7 @@ Explicitly will not be built unless the constraints change.
 
 - **Mobile support.** The plugin is desktop-only because we rely on Node APIs (`child_process`) for Docker detection and Procrast CLI shell-outs. Obsidian Mobile has no Node runtime.
 - **Time-travel slider.** Replaying the state of the vault on a previous day was an early creative idea but is too invasive to scope reliably.
-- **Two-way command-center buttons** that run arbitrary shell scripts directly from the dashboard. Anything that runs a shell command should go through the Claude Code terminal so the user sees the output.
+- **Two-way command-center buttons** that run arbitrary shell scripts directly from the dashboard. Anything that runs a shell command should go through the Claude Code terminal so the user sees the output. This bans *arbitrary* shell only — fixed subcommands of a known tool with validated arguments, like the GitHub Actions widget's `gh workflow run` / `gh run rerun` / `gh run cancel`, are allowed, because there is no command line for the user to compose and the output that matters lives on github.com.
 - **Publishing to the Obsidian community plugin registry.** This is a personal tool; the maintenance and review overhead of public distribution is not worth it right now.
 
 ---

@@ -97,7 +97,11 @@
   }
 </script>
 
-<WidgetPanel title="Daily tasks + next workday" {isCollapsed} {onToggleCollapsed}>
+<WidgetPanel
+  title="Daily tasks + next workday"
+  summary={viewState === "data" ? `${totalOpenTaskCount} open` : ""}
+  {isCollapsed}
+  {onToggleCollapsed}>
   {#if viewState === "data"}
     <div class="agenda" class:is-nonworking={!todayIsWorkingDay}>
       {#if !todayIsWorkingDay}

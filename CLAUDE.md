@@ -48,17 +48,21 @@ obsidian-dashboard/
 │   │   ├── tasks.ts          # Open task aggregation across the vault.
 │   │   ├── tags.ts           # Tag and folder statistics.
 │   │   ├── graph.ts          # Orphans, hubs, broken links.
-│   │   └── docker.ts         # Running container detection (Phase 5).
+│   │   ├── docker.ts         # Running container detection (Phase 5).
+│   │   ├── githubActions.ts  # Workflow runs, dispatch, re-run, cancel. Shells out to `gh`.
+│   │   └── desktopNotification.ts  # Obsidian Notice + OS notification in one call.
 │   └── ui/
 │       ├── App.svelte        # Dashboard root. Hosts the tab bar and widget grid.
 │       ├── TabBar.svelte     # Work/Private/... tab switcher.
+│       ├── SearchableSelect.svelte  # Combobox: trigger + panel with a search box and full list.
 │       └── widgets/
 │           ├── WidgetPanel.svelte     # Shared collapsible panel shell (sharpened header + collapse).
 │           ├── RecentFiles.svelte
 │           ├── DailyTasks.svelte
 │           ├── TagFolderStats.svelte
 │           ├── GraphInsights.svelte
-│           └── PinnedProjects.svelte  # Contains the per-project Docker indicator.
+│           ├── PinnedProjects.svelte  # Docker indicator + continuous integration glyph per row.
+│           └── ProjectGitHubActions.svelte  # Detail-page section: run list + dispatch row.
 ```
 
 Design tokens live in `styles.css` (the `.vault-dashboard { … }` custom-property block),
@@ -154,6 +158,25 @@ The user has explicitly asked for this style. Future Claude sessions must follow
 8. **No dead code.** No commented-out blocks. No "just in case" exports. If it isn't used, delete it.
 
 When you finish a file, re-read it as a stranger would. If a line needs a comment to explain *what* it does, rename the identifiers and split the line until it doesn't.
+
+---
+
+## Two layout traps that have each caused real bugs
+
+1. **`styles.css` applies `all: unset` to every `.vault-dashboard button`.** That reset also clears
+   `box-sizing` (back to `content-box`) and `min-width` (to `0`). Consequences seen in practice: a
+   full-width row button rendered 26px wider than its list item and overflowed the panel; a button
+   in a flex row shrank until its own label spilled past its border. **Any styled button in this
+   plugin must restate `box-sizing: border-box`, and pin `flex` if it lives in a flex row.**
+
+2. **A per-row grid does not align across rows.** Each row element is its own grid container, so an
+   `auto` track is measured from that row's content alone. Give every column a fixed track (and
+   render every cell on every row, empty when there is no value) whenever columns are meant to line
+   up down a list. A *trailing* `auto` column is the one safe exception, because right-alignment
+   hides the ragged left edge.
+
+Dense rows also carry a column header (`.project-column-header`, `.jira-column-header`) that mirrors
+the data row's grid exactly, so the glyphs are labelled rather than memorised.
 
 ---
 

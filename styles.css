@@ -50,6 +50,11 @@
   --vault-dashboard-space-section: 24px;
   --vault-dashboard-space-pane: 28px;
 
+  /* Interactive controls share one height so a row of them lines up regardless of which
+     component drew them. Obsidian's own inputs sit at 30px; matching that keeps the dashboard
+     feeling native rather than like a cramped widget bolted into the pane. */
+  --vault-dashboard-control-height: 30px;
+
   --vault-dashboard-border-width: 1px;
   --vault-dashboard-border-radius: 0;
   --vault-dashboard-border-color-default: var(--background-modifier-border);

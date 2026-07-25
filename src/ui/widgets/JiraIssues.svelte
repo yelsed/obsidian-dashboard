@@ -104,10 +104,22 @@
   $: hasAnyIssues = jiraSnapshot.issues.length > 0;
 </script>
 
-<WidgetPanel title="Jira issues" {isCollapsed} {onToggleCollapsed}>
+<WidgetPanel
+  title="Jira issues"
+  summary={jiraSnapshot.jiraAvailability === "available" && hasAnyIssues
+    ? `${jiraSnapshot.issues.length} open`
+    : ""}
+  {isCollapsed}
+  {onToggleCollapsed}
+>
   <button slot="header-actions" type="button" class="jira-refresh-button" on:click={onRefresh}>refresh ↻</button>
 
   {#if jiraSnapshot.jiraAvailability === "available" && hasAnyIssues}
+    <div class="jira-column-header" aria-hidden="true">
+      <span class="jira-column-label">issue</span>
+      <span class="jira-column-label jira-column-label-status">status</span>
+      <span class="jira-column-label">due</span>
+    </div>
     <ul class="jira-sprint-list">
       {#each sprintGroups as sprintGroup (sprintGroup.sprintKey)}
         <li class="jira-sprint-group">
@@ -125,7 +137,7 @@
                           <span class="jira-issue-key">{taskIssue.issueKey}</span>
                           <span class="jira-issue-summary">{taskIssue.summaryText}</span>
                           <span class="jira-issue-status" data-status-category={taskIssue.statusCategoryKey}>{taskIssue.statusName}</span>
-                          {#if taskIssue.dueDateIsoString}<span class="jira-issue-due">{formatDueDateLabel(taskIssue.dueDateIsoString)}</span>{/if}
+                          <span class="jira-issue-due">{formatDueDateLabel(taskIssue.dueDateIsoString)}</span>
                         </button>
                         {#if taskNode.subtasks.length > 0}
                           <ul class="jira-subtask-list">
@@ -136,6 +148,7 @@
                                   <span class="jira-issue-key">{subtask.issueKey}</span>
                                   <span class="jira-issue-summary">{subtask.summaryText}</span>
                                   <span class="jira-issue-status" data-status-category={subtask.statusCategoryKey}>{subtask.statusName}</span>
+                                  <span class="jira-issue-due"></span>
                                 </button>
                               </li>
                             {/each}
@@ -157,6 +170,7 @@
                                 <span class="jira-issue-key">{subtask.issueKey}</span>
                                 <span class="jira-issue-summary">{subtask.summaryText}</span>
                                 <span class="jira-issue-status" data-status-category={subtask.statusCategoryKey}>{subtask.statusName}</span>
+                                  <span class="jira-issue-due"></span>
                               </button>
                             </li>
                           {/each}
@@ -221,6 +235,31 @@
   }
 
   .jira-sprint-list { gap: var(--vault-dashboard-space-panel-inner); }
+
+  /* Same trailing tracks as the issue rows, so "status" and "due" stand over the columns they
+     name. The leading 1fr stands in for the key + summary, which need no label. */
+  .jira-column-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 12ch 15ch;
+    gap: var(--vault-dashboard-space-inline);
+    padding-bottom: var(--vault-dashboard-space-row);
+    margin-bottom: var(--vault-dashboard-space-row);
+    border-bottom: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-default);
+  }
+
+  .jira-column-label {
+    color: var(--vault-dashboard-text-faint);
+    font-size: var(--vault-dashboard-font-size-label);
+    text-transform: uppercase;
+    letter-spacing: var(--vault-dashboard-letter-spacing-uppercase);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .jira-column-label-status,
+  .jira-column-label + .jira-column-label {
+    text-align: left;
+  }
   .jira-epic-list { padding-left: var(--vault-dashboard-space-inline); }
   .jira-subtask-list { padding-left: var(--vault-dashboard-space-panel-inner); }
 
@@ -236,8 +275,12 @@
   }
 
   .jira-issue-button {
+    box-sizing: border-box;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    /* Status and due are fixed tracks, and the due cell is always rendered even when empty. As
+       trailing `auto` columns they were sized per row, so a "To Do" row and an "In Progress" row
+       put their status in different places and the due dates never lined up. */
+    grid-template-columns: auto minmax(0, 1fr) 12ch 15ch;
     align-items: baseline;
     gap: var(--vault-dashboard-space-inline);
     width: 100%;
@@ -251,7 +294,7 @@
     cursor: pointer;
   }
 
-  .jira-subtask-button { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+  .jira-subtask-button { grid-template-columns: auto auto minmax(0, 1fr) 12ch 15ch; }
   .jira-issue-button:hover { color: var(--vault-dashboard-color-accent-cyan); }
   .jira-issue-button:focus-visible { outline: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-accent); outline-offset: 2px; }
 
@@ -263,6 +306,41 @@
   .jira-issue-due,
   .jira-subtask-glyph,
   .jira-orphan-subtasks p { color: var(--vault-dashboard-text-faint); font-size: var(--vault-dashboard-font-size-label); font-style: italic; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* 27ch of fixed status and due tracks leaves a narrow pane almost nothing for the summary, which
+     is the only part worth reading. Below this width the row wraps and the header goes with it. */
+  @media (max-width: 640px) {
+    .jira-column-header {
+      display: none;
+    }
+
+    .jira-issue-button,
+    .jira-subtask-button {
+      grid-template-columns: auto minmax(0, 1fr);
+      row-gap: 2px;
+    }
+
+    .jira-issue-status,
+    .jira-issue-due {
+      grid-column: 2;
+    }
+
+    /* A subtask has an extra leading glyph, so without explicit placement its five cells
+       auto-flow into two columns and the key lands on the wrong line. */
+    .jira-subtask-button .jira-subtask-glyph {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .jira-subtask-button .jira-issue-key,
+    .jira-subtask-button .jira-issue-summary {
+      grid-column: 2;
+    }
+
+    .jira-issue-due:empty {
+      display: none;
+    }
+  }
 
   .widget-empty { margin: 0; color: var(--vault-dashboard-text-secondary); }
   .widget-error { margin: 0; color: var(--vault-dashboard-color-status-stopped); }

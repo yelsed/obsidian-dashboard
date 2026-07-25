@@ -3,6 +3,7 @@
   import type { PinnedProjectForWidget } from "../../data/pinnedProjects";
   import type { ShellCommandRunSnapshot } from "../../data/projectShellCommands";
   import { buildJiraSprintEpicHierarchy } from "../jiraHierarchy";
+  import ProjectGitHubActions from "./ProjectGitHubActions.svelte";
 
   type FileTreeRow =
     | {
@@ -44,6 +45,11 @@
   export let onCollectOpenTasksIntoProjectGoals: (pinnedProjectId: string) => void = () => {};
   export let onOpenJiraIssueInBrowser: (issueBrowserUrl: string) => void = () => {};
   export let onStartClaudeSessionFromJiraIssue: (pinnedProjectId: string, issueKey: string) => void = () => {};
+  export let onRefreshGitHubActions: () => void = () => {};
+  export let onDispatchGitHubWorkflow: (pinnedProjectId: string, workflowFilePath: string, branchName: string) => void = () => {};
+  export let onRerunFailedGitHubJobs: (pinnedProjectId: string, runDatabaseId: number) => void = () => {};
+  export let onCancelGitHubRun: (pinnedProjectId: string, runDatabaseId: number) => void = () => {};
+  export let onOpenGitHubRunInBrowser: (runBrowserUrl: string) => void = () => {};
 
   const MAXIMUM_VISIBLE_CONTAINER_CELLS = 4;
   const FRESHNESS_GLYPH_BY_LEVEL = {
@@ -272,6 +278,16 @@
         {/if}
       </div>
     </section>
+
+    <ProjectGitHubActions
+      pinnedProjectId={pinnedProject.id}
+      gitHubActionsSnapshot={pinnedProject.gitHubActionsSnapshot}
+      onRefresh={onRefreshGitHubActions}
+      onDispatchWorkflow={onDispatchGitHubWorkflow}
+      onRerunFailedJobs={onRerunFailedGitHubJobs}
+      onCancelRun={onCancelGitHubRun}
+      onOpenRunInBrowser={onOpenGitHubRunInBrowser}
+    />
 
     <section class="project-detail-section">
       <h3>Jira issues</h3>
