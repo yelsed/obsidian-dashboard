@@ -55,7 +55,12 @@
   }
 </script>
 
-<WidgetPanel title="Graph" {isCollapsed} {onToggleCollapsed}>
+<WidgetPanel
+  title="Graph"
+  summary={viewState === "data" ? `${orphanNoteCount} orphans · ${brokenLinkCount} broken` : ""}
+  {isCollapsed}
+  {onToggleCollapsed}
+>
   {#if viewState === "data"}
     <ul class="metric-list">
       <li class="metric-row">

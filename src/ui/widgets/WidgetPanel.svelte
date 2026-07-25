@@ -2,6 +2,10 @@
   export let title: string;
   export let isCollapsed: boolean = false;
   export let onToggleCollapsed: () => void = () => {};
+  /* A one-glance reading of what the panel holds — "5 / 312", "3 open", "2 failing". Seven
+     identically-titled panels give the eye nothing to land on; a number in the header lets the
+     dashboard be read without reading any panel's contents. */
+  export let summary: string = "";
 </script>
 
 <section class="vault-dashboard-panel widget" class:is-collapsed={isCollapsed}>
@@ -13,6 +17,9 @@
       on:click={onToggleCollapsed}
     >
       <h2 class="vault-dashboard-panel-heading">{title}</h2>
+      {#if summary.length > 0}
+        <span class="widget-panel-summary">{summary}</span>
+      {/if}
       <span class="widget-panel-chevron" aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span>
     </button>
     <slot name="header-actions" />
@@ -35,11 +42,11 @@
     margin:
       0
       calc(-1 * var(--vault-dashboard-space-panel-outer))
-      var(--vault-dashboard-space-panel-inner);
+      var(--vault-dashboard-space-inline);
     padding:
       0
       var(--vault-dashboard-space-panel-outer)
-      var(--vault-dashboard-space-panel-inner);
+      var(--vault-dashboard-space-row);
     border-bottom: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-strong);
   }
 
@@ -55,10 +62,12 @@
     padding-bottom: 0;
   }
 
+  /* The title claims only the space it needs; the summary sits directly beside it and the
+     chevron is pushed to the far edge. Previously the title and chevron were forced apart by
+     space-between, which left a wide empty band that read as a gap rather than a header. */
   .widget-panel-toggle {
     display: flex;
     align-items: baseline;
-    justify-content: space-between;
     gap: var(--vault-dashboard-space-inline);
     flex: 1 1 auto;
     min-width: 0;
@@ -81,10 +90,26 @@
     padding-bottom: 0;
     border-bottom: none;
     color: var(--vault-dashboard-text-primary);
+    /* The title is the anchor and must stay on one line; the summary beside it is the part
+       that gives way when the column is narrow. */
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .widget-panel-summary {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--vault-dashboard-text-faint);
+    font-size: var(--vault-dashboard-font-size-label);
+    font-variant-numeric: tabular-nums;
   }
 
   .widget-panel-chevron {
     flex-shrink: 0;
+    margin-left: auto;
     color: var(--vault-dashboard-text-faint);
     font-size: var(--vault-dashboard-font-size-label);
     transition: color var(--vault-dashboard-motion-duration-instant) var(--vault-dashboard-motion-easing-snap);

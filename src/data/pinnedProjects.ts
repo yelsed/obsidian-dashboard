@@ -10,6 +10,7 @@ import type {
 } from "../settings";
 import type { DockerContainerSummary, DockerSnapshot } from "./docker";
 import type { JiraAvailability, JiraIssueSummary, JiraSnapshot } from "./jira";
+import type { GitHubProjectActionsSnapshot } from "./githubActions";
 import {
   readRecentClaudeSessionsForProject,
   type ClaudeSessionSummary,
@@ -56,20 +57,21 @@ export type PinnedProjectForWidget = {
   freshnessLevel: FreshnessLevel;
   relativeModifiedTimeLabel: string;
   markdownFileCount: number;
-  childMarkdownFilesPreview: ChildMarkdownFileForWidget[];
-  childMarkdownFilesOverflowCount: number;
+  childMarkdownFiles: ChildMarkdownFileForWidget[];
   storedShellCommands: StoredShellCommandForWidget[];
   recentClaudeSessions: ClaudeSessionSummary[];
   lastClaudeSessionLastActivityAtMilliseconds: number | null;
   goalsFileExists: boolean;
   openTasks: ProjectOpenTaskForWidget[];
-  openTaskOverflowCount: number;
-  isExpanded: boolean;
+  openTaskCollectionWasLimited: boolean;
   procrastOrigin: ProcrastOriginForWidget | null;
   jiraProjectKey: string;
   jiraAvailability: JiraAvailability;
   jiraOpenIssueCount: number;
   jiraIssuesForProject: JiraIssueSummary[];
+  // Null when the project folder is not a GitHub repository, which is also how the widget
+  // decides to show no continuous integration state at all rather than an empty one.
+  gitHubActionsSnapshot: GitHubProjectActionsSnapshot | null;
 };
 
 export type { ClaudeSessionSummary } from "./claudeSessions";
@@ -79,7 +81,9 @@ export type PinnedProjectsStore = {
   setPinnedProjectsConfig: (pinnedProjectsConfig: PinnedProjectConfig[]) => void;
   setDockerSnapshot: (dockerSnapshot: DockerSnapshot) => void;
   setJiraSnapshot: (jiraSnapshot: JiraSnapshot) => void;
-  setExpandedProjectIds: (expandedProjectIds: Set<PinnedProjectId>) => void;
+  setGitHubActionsSnapshots: (
+    gitHubActionsSnapshots: GitHubProjectActionsSnapshot[],
+  ) => void;
   setProcrastIdeaFolderMappings: (
     procrastIdeaFolderMappings: ProcrastIdeaFolderMapping[],
   ) => void;
@@ -89,13 +93,19 @@ export type PinnedProjectsStore = {
 const FRESHNESS_ACTIVE_DAY_THRESHOLD = 7;
 const FRESHNESS_COOLING_DAY_THRESHOLD = 30;
 const ONE_DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000;
-const CHILD_FILES_PREVIEW_LIMIT = 5;
 const RECENT_CLAUDE_SESSIONS_LIMIT_PER_PROJECT = 3;
 const FILESYSTEM_WALK_MAX_DEPTH = 4;
 const PROJECT_GOALS_FILE_NAME = "GOALS.md";
 const PROJECT_TASK_SCAN_FILE_LIMIT = 40;
 const PROJECT_TASK_COLLECTION_LIMIT = 200;
-const PROJECT_TASK_DISPLAY_LIMIT = 6;
+const PROJECT_TASK_SOURCE_FILE_NAMES: ReadonlySet<string> = new Set([
+  "goals.md",
+  "goal.md",
+  "tasks.md",
+  "task.md",
+  "todos.md",
+  "todo.md",
+]);
 const PERIODIC_FILESYSTEM_REFRESH_MILLISECONDS = 30_000;
 const IGNORED_DIRECTORY_NAMES: ReadonlySet<string> = new Set([
   "node_modules",
@@ -119,6 +129,7 @@ type CachedProjectFilesystemSnapshot = {
   markdownFiles: CachedMarkdownFileEntry[];
   goalsFileExists: boolean;
   openTasks: ProjectOpenTaskForWidget[];
+  openTaskCollectionWasLimited: boolean;
 };
 
 export function createPinnedProjectsStore(): PinnedProjectsStore {
@@ -134,7 +145,7 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
     lastErrorMessage: null,
     lastRefreshedAtEpochMilliseconds: null,
   };
-  let currentExpandedProjectIds: Set<PinnedProjectId> = new Set();
+  let gitHubActionsSnapshotByPinnedProjectId = new Map<string, GitHubProjectActionsSnapshot>();
   let currentProcrastIdeaFolderMappings: ProcrastIdeaFolderMapping[] = [];
   const filesystemSnapshotByAbsoluteFolderPath = new Map<string, CachedProjectFilesystemSnapshot>();
   const recentClaudeSessionsByAbsoluteFolderPath = new Map<string, ClaudeSessionSummary[]>();
@@ -158,6 +169,7 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
       markdownFiles: [],
       goalsFileExists: false,
       openTasks: [],
+      openTaskCollectionWasLimited: false,
     };
 
     const sortedMarkdownFiles = [...cachedFilesystemSnapshot.markdownFiles].sort(
@@ -167,17 +179,10 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
 
     const mostRecentModifiedTimestamp = sortedMarkdownFiles[0]?.modifiedAtMilliseconds ?? 0;
 
-    const childMarkdownFilesPreview = sortedMarkdownFiles
-      .slice(0, CHILD_FILES_PREVIEW_LIMIT)
-      .map((entry) => ({
-        relativeFilePath: entry.relativeFilePath,
-        relativeModifiedTimeLabel: formatRelativeModifiedTime(entry.modifiedAtMilliseconds),
-      }));
-
-    const overflowCount = Math.max(
-      0,
-      sortedMarkdownFiles.length - CHILD_FILES_PREVIEW_LIMIT,
-    );
+    const childMarkdownFiles = sortedMarkdownFiles.map((entry) => ({
+      relativeFilePath: entry.relativeFilePath,
+      relativeModifiedTimeLabel: formatRelativeModifiedTime(entry.modifiedAtMilliseconds),
+    }));
 
     const pairedContainers = pairContainersToProject(
       currentDockerSnapshot.containers,
@@ -202,14 +207,6 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
         ? recentClaudeSessions[0].lastActivityAtMilliseconds
         : null;
 
-    const displayedOpenTasks = cachedFilesystemSnapshot.openTasks.slice(
-      0,
-      PROJECT_TASK_DISPLAY_LIMIT,
-    );
-    const openTaskOverflowCount = Math.max(
-      0,
-      cachedFilesystemSnapshot.openTasks.length - PROJECT_TASK_DISPLAY_LIMIT,
-    );
 
     const procrastOrigin = resolveProcrastOriginForProject(
       projectConfig.folderPath,
@@ -237,20 +234,19 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
             : "folder missing"
           : formatRelativeModifiedTime(mostRecentModifiedTimestamp),
       markdownFileCount: sortedMarkdownFiles.length,
-      childMarkdownFilesPreview,
-      childMarkdownFilesOverflowCount: overflowCount,
+      childMarkdownFiles,
       storedShellCommands: storedShellCommandsForWidget,
       recentClaudeSessions,
       lastClaudeSessionLastActivityAtMilliseconds,
       goalsFileExists: cachedFilesystemSnapshot.goalsFileExists,
-      openTasks: displayedOpenTasks,
-      openTaskOverflowCount,
-      isExpanded: currentExpandedProjectIds.has(projectConfig.id),
+      openTasks: cachedFilesystemSnapshot.openTasks,
+      openTaskCollectionWasLimited: cachedFilesystemSnapshot.openTaskCollectionWasLimited,
       procrastOrigin,
       jiraProjectKey,
       jiraAvailability: currentJiraSnapshot.jiraAvailability,
       jiraOpenIssueCount,
       jiraIssuesForProject,
+      gitHubActionsSnapshot: gitHubActionsSnapshotByPinnedProjectId.get(projectConfig.id) ?? null,
     };
   }
 
@@ -310,15 +306,20 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
     publishCurrentWidgetSnapshot();
   }
 
+  function setGitHubActionsSnapshots(
+    gitHubActionsSnapshots: GitHubProjectActionsSnapshot[],
+  ): void {
+    gitHubActionsSnapshotByPinnedProjectId = new Map(
+      gitHubActionsSnapshots.map((snapshot) => [snapshot.pinnedProjectId, snapshot] as const),
+    );
+    publishCurrentWidgetSnapshot();
+  }
+
   function setJiraSnapshot(jiraSnapshot: JiraSnapshot): void {
     currentJiraSnapshot = jiraSnapshot;
     publishCurrentWidgetSnapshot();
   }
 
-  function setExpandedProjectIds(expandedProjectIds: Set<PinnedProjectId>): void {
-    currentExpandedProjectIds = expandedProjectIds;
-    publishCurrentWidgetSnapshot();
-  }
 
   function setProcrastIdeaFolderMappings(
     procrastIdeaFolderMappings: ProcrastIdeaFolderMapping[],
@@ -343,7 +344,7 @@ export function createPinnedProjectsStore(): PinnedProjectsStore {
     setPinnedProjectsConfig,
     setDockerSnapshot,
     setJiraSnapshot,
-    setExpandedProjectIds,
+    setGitHubActionsSnapshots,
     setProcrastIdeaFolderMappings,
     destroy,
   };
@@ -390,10 +391,22 @@ async function scanProjectFilesystem(
   try {
     const folderStatistics = await filesystemPromises.stat(absoluteFolderPath);
     if (!folderStatistics.isDirectory()) {
-      return { folderExists: false, markdownFiles: [], goalsFileExists: false, openTasks: [] };
+      return {
+        folderExists: false,
+        markdownFiles: [],
+        goalsFileExists: false,
+        openTasks: [],
+        openTaskCollectionWasLimited: false,
+      };
     }
   } catch {
-    return { folderExists: false, markdownFiles: [], goalsFileExists: false, openTasks: [] };
+    return {
+      folderExists: false,
+      markdownFiles: [],
+      goalsFileExists: false,
+      openTasks: [],
+      openTaskCollectionWasLimited: false,
+    };
   }
 
   const collectedMarkdownFiles: CachedMarkdownFileEntry[] = [];
@@ -408,39 +421,44 @@ async function scanProjectFilesystem(
     (markdownFile) =>
       markdownFile.relativeFilePath.toLowerCase() === PROJECT_GOALS_FILE_NAME.toLowerCase(),
   );
-  const openTasks = await collectOpenTasksFromProjectMarkdownFiles(collectedMarkdownFiles);
+  const openTaskCollection = await collectOpenTasksFromProjectMarkdownFiles(collectedMarkdownFiles);
 
-  return { folderExists: true, markdownFiles: collectedMarkdownFiles, goalsFileExists, openTasks };
+  return {
+    folderExists: true,
+    markdownFiles: collectedMarkdownFiles,
+    goalsFileExists,
+    openTasks: openTaskCollection.openTasks,
+    openTaskCollectionWasLimited: openTaskCollection.collectionWasLimited,
+  };
 }
 
-// GOALS.md is the collection sink: its checkboxes are written by "collect tasks" itself, so
-// scanning it as a task source would re-ingest collected tasks and accumulate duplicates.
-function isProjectGoalsFile(relativeFilePath: string): boolean {
-  return (
-    nodePath.basename(relativeFilePath).toLowerCase() === PROJECT_GOALS_FILE_NAME.toLowerCase()
-  );
+function isProjectTaskSourceFile(relativeFilePath: string): boolean {
+  return PROJECT_TASK_SOURCE_FILE_NAMES.has(nodePath.basename(relativeFilePath).toLowerCase());
 }
 
 async function collectOpenTasksFromProjectMarkdownFiles(
   markdownFiles: CachedMarkdownFileEntry[],
-): Promise<ProjectOpenTaskForWidget[]> {
+): Promise<{ openTasks: ProjectOpenTaskForWidget[]; collectionWasLimited: boolean }> {
   const mostRecentlyModifiedMarkdownFiles = [...markdownFiles]
-    .filter((markdownFile) => !isProjectGoalsFile(markdownFile.relativeFilePath))
-    .sort((leftEntry, rightEntry) => rightEntry.modifiedAtMilliseconds - leftEntry.modifiedAtMilliseconds)
+    .filter((markdownFile) => isProjectTaskSourceFile(markdownFile.relativeFilePath))
+    .sort(
+      (leftEntry, rightEntry) =>
+        rightEntry.modifiedAtMilliseconds - leftEntry.modifiedAtMilliseconds,
+    )
     .slice(0, PROJECT_TASK_SCAN_FILE_LIMIT);
 
   const collectedOpenTasks: ProjectOpenTaskForWidget[] = [];
-  for (const markdownFile of mostRecentlyModifiedMarkdownFiles) {
-    if (collectedOpenTasks.length >= PROJECT_TASK_COLLECTION_LIMIT) {
-      break;
-    }
+  for (let fileIndex = 0; fileIndex < mostRecentlyModifiedMarkdownFiles.length; fileIndex += 1) {
+    const markdownFile = mostRecentlyModifiedMarkdownFiles[fileIndex];
     let fileContents: string;
     try {
       fileContents = await filesystemPromises.readFile(markdownFile.absoluteFilePath, "utf8");
     } catch {
       continue;
     }
-    for (const lineText of fileContents.split("\n")) {
+    const fileLines = fileContents.split("\n");
+    for (let lineIndex = 0; lineIndex < fileLines.length; lineIndex += 1) {
+      const lineText = fileLines[lineIndex];
       const matchedOpenTask = lineText.match(OPEN_TASK_LINE_PATTERN);
       if (!matchedOpenTask) {
         continue;
@@ -451,11 +469,16 @@ async function collectOpenTasksFromProjectMarkdownFiles(
       }
       collectedOpenTasks.push({ taskText, relativeFilePath: markdownFile.relativeFilePath });
       if (collectedOpenTasks.length >= PROJECT_TASK_COLLECTION_LIMIT) {
-        break;
+        return {
+          openTasks: collectedOpenTasks,
+          collectionWasLimited:
+            lineIndex < fileLines.length - 1 ||
+            fileIndex < mostRecentlyModifiedMarkdownFiles.length - 1,
+        };
       }
     }
   }
-  return collectedOpenTasks;
+  return { openTasks: collectedOpenTasks, collectionWasLimited: false };
 }
 
 async function walkDirectoryCollectingMarkdownFiles(

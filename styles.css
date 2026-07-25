@@ -50,6 +50,11 @@
   --vault-dashboard-space-section: 24px;
   --vault-dashboard-space-pane: 28px;
 
+  /* Interactive controls share one height so a row of them lines up regardless of which
+     component drew them. Obsidian's own inputs sit at 30px; matching that keeps the dashboard
+     feeling native rather than like a cramped widget bolted into the pane. */
+  --vault-dashboard-control-height: 30px;
+
   --vault-dashboard-border-width: 1px;
   --vault-dashboard-border-radius: 0;
   --vault-dashboard-border-color-default: var(--background-modifier-border);
@@ -300,14 +305,43 @@
   margin-top: 12px;
   max-height: 60vh;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 
 .vault-dashboard-jira-issues-modal-empty {
   margin: 12px 0;
   color: var(--text-muted);
+}
+
+.vault-dashboard-jira-issues-modal-sprint-list,
+.vault-dashboard-jira-issues-modal-epic-list,
+.vault-dashboard-jira-issues-modal-task-list,
+.vault-dashboard-jira-issues-modal-subtask-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vault-dashboard-jira-issues-modal-sprint-list {
+  gap: 14px;
+}
+
+.vault-dashboard-jira-issues-modal-epic-list,
+.vault-dashboard-jira-issues-modal-subtask-list {
+  padding-left: 14px;
+}
+
+.vault-dashboard-jira-issues-modal-sprint-heading,
+.vault-dashboard-jira-issues-modal-epic-heading,
+.vault-dashboard-jira-issues-modal-orphans-heading {
+  margin: 0 0 6px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .vault-dashboard-jira-issues-modal-row {
@@ -318,6 +352,10 @@
   padding: 6px 4px;
   border-bottom: 1px solid var(--background-modifier-border);
   font-size: 12px;
+}
+
+.vault-dashboard-jira-issues-modal-row-subtask {
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto auto;
 }
 
 .vault-dashboard-jira-issues-modal-key {
@@ -335,6 +373,12 @@
 
 .vault-dashboard-jira-issues-modal-key:hover {
   text-decoration: underline;
+}
+
+.vault-dashboard-jira-issues-modal-key:focus-visible,
+.vault-dashboard-jira-issues-modal-fix:focus-visible {
+  outline: 1px solid var(--background-modifier-border-focus);
+  outline-offset: 2px;
 }
 
 .vault-dashboard-jira-issues-modal-summary {
@@ -358,11 +402,18 @@
   color: var(--color-green);
 }
 
-.vault-dashboard-jira-issues-modal-due {
+.vault-dashboard-jira-issues-modal-due,
+.vault-dashboard-jira-issues-modal-subtask-glyph,
+.vault-dashboard-jira-issues-modal-orphan-parent {
   color: var(--text-faint);
   font-style: italic;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.vault-dashboard-jira-issues-modal-orphan-parent {
+  margin: 4px 0;
+  font-size: 11px;
 }
 
 .vault-dashboard-jira-issues-modal-fix {
@@ -372,7 +423,7 @@
   cursor: pointer;
   background: var(--background-secondary);
   border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
+  border-radius: 0;
   padding: 2px 8px;
   font-family: inherit;
 }
