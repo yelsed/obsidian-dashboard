@@ -1,7 +1,6 @@
 import { App, Modal, Setting } from "obsidian";
 import type { JiraIssueSummary } from "../data/jira";
-
-type JiraIssueSortMode = "updated" | "key" | "priority" | "due" | "status" | "summary";
+import { buildJiraSprintEpicHierarchy } from "./jiraHierarchy";
 
 export type JiraIssuesModalParameters = {
   jiraProjectKey: string;
@@ -14,31 +13,9 @@ export type JiraIssuesModalParameters = {
   ) => void;
 };
 
-const SORT_MODE_LABELS: Record<JiraIssueSortMode, string> = {
-  updated: "Recently updated",
-  key: "Issue key",
-  priority: "Priority (high first)",
-  due: "Due date (soonest)",
-  status: "Status",
-  summary: "Summary (A–Z)",
-};
-
-const PRIORITY_RANK_BY_LOWERCASE_NAME: Record<string, number> = {
-  highest: 1,
-  blocker: 1,
-  critical: 2,
-  high: 3,
-  medium: 5,
-  low: 7,
-  lowest: 9,
-  trivial: 9,
-};
-const UNKNOWN_PRIORITY_RANK = 5;
-
 export class JiraIssuesModal extends Modal {
   private readonly parameters: JiraIssuesModalParameters;
   private searchText = "";
-  private sortMode: JiraIssueSortMode = "updated";
   private issueListContainerElement: HTMLElement | null = null;
 
   constructor(obsidianApplication: App, parameters: JiraIssuesModalParameters) {
@@ -56,23 +33,12 @@ export class JiraIssuesModal extends Modal {
     });
 
     new Setting(contentEl).setName("Search").addText((textInput) => {
-      textInput.setPlaceholder("Filter by key, summary, or status…");
+      textInput.setPlaceholder("Filter by key, summary, status, type, parent, epic, or sprint…");
       textInput.onChange((value) => {
         this.searchText = value;
         this.renderIssueList();
       });
       window.setTimeout(() => textInput.inputEl.focus(), 0);
-    });
-
-    new Setting(contentEl).setName("Sort by").addDropdown((dropdownControl) => {
-      for (const sortMode of Object.keys(SORT_MODE_LABELS) as JiraIssueSortMode[]) {
-        dropdownControl.addOption(sortMode, SORT_MODE_LABELS[sortMode]);
-      }
-      dropdownControl.setValue(this.sortMode);
-      dropdownControl.onChange((value) => {
-        this.sortMode = value as JiraIssueSortMode;
-        this.renderIssueList();
-      });
     });
 
     this.issueListContainerElement = contentEl.createDiv({
@@ -92,11 +58,7 @@ export class JiraIssuesModal extends Modal {
     }
     listContainer.empty();
 
-    const visibleIssues = sortIssues(
-      filterIssues(this.parameters.issues, this.searchText),
-      this.sortMode,
-    );
-
+    const visibleIssues = filterIssues(this.parameters.issues, this.searchText);
     if (visibleIssues.length === 0) {
       listContainer.createEl("p", {
         text: "No matching issues.",
@@ -105,15 +67,97 @@ export class JiraIssuesModal extends Modal {
       return;
     }
 
-    for (const issue of visibleIssues) {
-      this.renderIssueRow(listContainer, issue);
+    const sprintListElement = listContainer.createEl("ul", {
+      cls: "vault-dashboard-jira-issues-modal-sprint-list",
+    });
+    for (const sprintGroup of buildJiraSprintEpicHierarchy(visibleIssues)) {
+      const sprintItemElement = sprintListElement.createEl("li", {
+        cls: "vault-dashboard-jira-issues-modal-sprint",
+      });
+      sprintItemElement.createEl("h3", {
+        text:
+          sprintGroup.sprintState === null
+            ? sprintGroup.sprintName
+            : `${sprintGroup.sprintName} · ${sprintGroup.sprintState}`,
+        cls: "vault-dashboard-jira-issues-modal-sprint-heading",
+      });
+
+      const epicListElement = sprintItemElement.createEl("ul", {
+        cls: "vault-dashboard-jira-issues-modal-epic-list",
+      });
+      for (const epicGroup of sprintGroup.epicGroups) {
+        const epicItemElement = epicListElement.createEl("li", {
+          cls: "vault-dashboard-jira-issues-modal-epic",
+        });
+        epicItemElement.createEl("h4", {
+          text: describeEpicHeading(epicGroup.epicKey, epicGroup.epicSummaryText),
+          cls: "vault-dashboard-jira-issues-modal-epic-heading",
+        });
+
+        const taskListElement = epicItemElement.createEl("ul", {
+          cls: "vault-dashboard-jira-issues-modal-task-list",
+        });
+        for (const taskNode of epicGroup.tasks) {
+          if (taskNode.taskIssue !== null) {
+            const taskItemElement = taskListElement.createEl("li", {
+              cls: "vault-dashboard-jira-issues-modal-task",
+            });
+            this.renderIssueRow(taskItemElement, taskNode.taskIssue, false);
+            if (taskNode.subtasks.length > 0) {
+              const subtaskListElement = taskItemElement.createEl("ul", {
+                cls: "vault-dashboard-jira-issues-modal-subtask-list",
+              });
+              for (const subtask of taskNode.subtasks) {
+                this.renderIssueRow(subtaskListElement.createEl("li"), subtask, true);
+              }
+            }
+          }
+        }
+
+        if (epicGroup.orphanSubtaskGroups.length > 0) {
+          const orphanItemElement = taskListElement.createEl("li", {
+            cls: "vault-dashboard-jira-issues-modal-orphans",
+          });
+          orphanItemElement.createEl("h5", {
+            text: "Subtasks without returned task",
+            cls: "vault-dashboard-jira-issues-modal-orphans-heading",
+          });
+          for (const orphanGroup of epicGroup.orphanSubtaskGroups) {
+            if (orphanGroup.parentIssue !== null) {
+              orphanItemElement.createEl("p", {
+                text: `parent ${orphanGroup.parentIssue.issueKey}`,
+                cls: "vault-dashboard-jira-issues-modal-orphan-parent",
+              });
+            }
+            const subtaskListElement = orphanItemElement.createEl("ul", {
+              cls: "vault-dashboard-jira-issues-modal-subtask-list",
+            });
+            for (const subtask of orphanGroup.subtasks) {
+              this.renderIssueRow(subtaskListElement.createEl("li"), subtask, true);
+            }
+          }
+        }
+      }
     }
   }
 
-  private renderIssueRow(parentElement: HTMLElement, issue: JiraIssueSummary): void {
+  private renderIssueRow(
+    parentElement: HTMLElement,
+    issue: JiraIssueSummary,
+    isSubtask: boolean,
+  ): void {
     const rowElement = parentElement.createDiv({
-      cls: "vault-dashboard-jira-issues-modal-row",
+      cls: isSubtask
+        ? "vault-dashboard-jira-issues-modal-row vault-dashboard-jira-issues-modal-row-subtask"
+        : "vault-dashboard-jira-issues-modal-row",
     });
+
+    if (isSubtask) {
+      rowElement.createSpan({
+        text: "↳",
+        cls: "vault-dashboard-jira-issues-modal-subtask-glyph",
+      });
+    }
 
     const issueKeyButton = rowElement.createEl("button", {
       text: issue.issueKey,
@@ -164,89 +208,16 @@ function filterIssues(issues: JiraIssueSummary[], searchText: string): JiraIssue
     return issues;
   }
   return issues.filter((issue) => {
-    const haystack = `${issue.issueKey} ${issue.summaryText} ${issue.statusName}`.toLowerCase();
+    const sprintNames = issue.sprints.map((sprint) => sprint.sprintName).join(" ");
+    const haystack = `${issue.issueKey} ${issue.summaryText} ${issue.statusName} ${issue.issueTypeName ?? ""} ${issue.parentIssue?.issueKey ?? ""} ${issue.parentIssue?.summaryText ?? ""} ${issue.epicIssueKey ?? ""} ${sprintNames}`.toLowerCase();
     return haystack.includes(normalisedSearchText);
   });
 }
 
-function sortIssues(
-  issues: JiraIssueSummary[],
-  sortMode: JiraIssueSortMode,
-): JiraIssueSummary[] {
-  const sortedIssues = [...issues];
-  switch (sortMode) {
-    case "updated":
-      sortedIssues.sort((left, right) =>
-        compareNullableStringsDescending(left.updatedIsoString, right.updatedIsoString),
-      );
-      break;
-    case "key":
-      sortedIssues.sort((left, right) => compareIssueKeys(left.issueKey, right.issueKey));
-      break;
-    case "priority":
-      sortedIssues.sort(
-        (left, right) =>
-          rankPriority(left.priorityName) - rankPriority(right.priorityName),
-      );
-      break;
-    case "due":
-      sortedIssues.sort((left, right) =>
-        compareNullableStringsAscending(left.dueDateIsoString, right.dueDateIsoString),
-      );
-      break;
-    case "status":
-      sortedIssues.sort((left, right) => left.statusName.localeCompare(right.statusName));
-      break;
-    case "summary":
-      sortedIssues.sort((left, right) => left.summaryText.localeCompare(right.summaryText));
-      break;
+function describeEpicHeading(epicKey: string, summaryText: string | null): string {
+  if (epicKey === "no-epic") {
+    return "No epic";
   }
-  return sortedIssues;
-}
-
-function rankPriority(priorityName: string | null): number {
-  if (priorityName === null) {
-    return UNKNOWN_PRIORITY_RANK;
-  }
-  return PRIORITY_RANK_BY_LOWERCASE_NAME[priorityName.toLowerCase()] ?? UNKNOWN_PRIORITY_RANK;
-}
-
-function compareIssueKeys(leftIssueKey: string, rightIssueKey: string): number {
-  const leftNumericSuffix = readIssueKeyNumericSuffix(leftIssueKey);
-  const rightNumericSuffix = readIssueKeyNumericSuffix(rightIssueKey);
-  if (leftNumericSuffix !== rightNumericSuffix) {
-    return leftNumericSuffix - rightNumericSuffix;
-  }
-  return leftIssueKey.localeCompare(rightIssueKey);
-}
-
-function readIssueKeyNumericSuffix(issueKey: string): number {
-  const numericMatch = issueKey.match(/(\d+)$/);
-  return numericMatch === null ? 0 : Number.parseInt(numericMatch[1], 10);
-}
-
-function compareNullableStringsDescending(left: string | null, right: string | null): number {
-  if (left === right) {
-    return 0;
-  }
-  if (left === null) {
-    return 1;
-  }
-  if (right === null) {
-    return -1;
-  }
-  return right.localeCompare(left);
-}
-
-function compareNullableStringsAscending(left: string | null, right: string | null): number {
-  if (left === right) {
-    return 0;
-  }
-  if (left === null) {
-    return 1;
-  }
-  if (right === null) {
-    return -1;
-  }
-  return left.localeCompare(right);
+  const issueKey = epicKey.startsWith("epic:") ? epicKey.slice(5) : epicKey;
+  return summaryText === null || summaryText.length === 0 ? issueKey : `${issueKey} — ${summaryText}`;
 }

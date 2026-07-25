@@ -10,6 +10,7 @@
   import TagFolderStats from "./widgets/TagFolderStats.svelte";
   import GraphInsights from "./widgets/GraphInsights.svelte";
   import PinnedProjects from "./widgets/PinnedProjects.svelte";
+  import PinnedProjectDetail from "./widgets/PinnedProjectDetail.svelte";
   import ClaudeSessions from "./widgets/ClaudeSessions.svelte";
   import ProcrastIdeas from "./widgets/ProcrastIdeas.svelte";
   import JiraIssues from "./widgets/JiraIssues.svelte";
@@ -111,7 +112,7 @@
   const procrastIdeasSnapshotData = procrastIdeasStore.store;
   const jiraSnapshotData = jiraIssuesStore.store;
 
-  let expandedPinnedProjectIds: Set<string> = new Set();
+  let selectedPinnedProjectIdForDetail: string | null = null;
   let hasRequestedInitialProcrastIdeasRefresh = false;
 
   pinnedProjectsStore.setPinnedProjectsConfig(initialActiveTab.pinnedProjects);
@@ -277,11 +278,26 @@
     pinnedProjectsStore.setProcrastIdeaFolderMappings(activeProcrastIdeaFolderMappings);
   }
 
+  $: selectedPinnedProjectForDetail =
+    selectedPinnedProjectIdForDetail === null
+      ? null
+      : $pinnedProjectsForWidgetData.find(
+          (project) => project.id === selectedPinnedProjectIdForDetail,
+        ) ?? null;
+
+  $: if (
+    selectedPinnedProjectIdForDetail !== null &&
+    !$pinnedProjectsForWidgetData.some(
+      (project) => project.id === selectedPinnedProjectIdForDetail,
+    )
+  ) {
+    selectedPinnedProjectIdForDetail = null;
+  }
+
   let lastSeenActiveTabReference: DashboardTab = initialActiveTab;
   $: if (activeTab !== lastSeenActiveTabReference) {
     lastSeenActiveTabReference = activeTab;
-    expandedPinnedProjectIds = new Set();
-    pinnedProjectsStore.setExpandedProjectIds(expandedPinnedProjectIds);
+    selectedPinnedProjectIdForDetail = null;
   }
 
   onDestroy(() => {
@@ -696,15 +712,12 @@
     }
   }
 
-  function handleTogglePinnedProjectExpansion(pinnedProjectId: string): void {
-    const nextExpandedProjectIds = new Set(expandedPinnedProjectIds);
-    if (nextExpandedProjectIds.has(pinnedProjectId)) {
-      nextExpandedProjectIds.delete(pinnedProjectId);
-    } else {
-      nextExpandedProjectIds.add(pinnedProjectId);
-    }
-    expandedPinnedProjectIds = nextExpandedProjectIds;
-    pinnedProjectsStore.setExpandedProjectIds(expandedPinnedProjectIds);
+  function handleOpenPinnedProjectDetail(pinnedProjectId: string): void {
+    selectedPinnedProjectIdForDetail = pinnedProjectId;
+  }
+
+  function handleReturnToPinnedProjectOverview(): void {
+    selectedPinnedProjectIdForDetail = null;
   }
 
   function handleOpenPinnedProjectChildFile(
@@ -720,6 +733,21 @@
       relativeChildFilePath,
     );
     openAbsoluteMarkdownFilePath(absoluteChildFilePath);
+  }
+
+  function handleOpenPinnedProjectChildFolder(
+    pinnedProjectId: string,
+    relativeChildFolderPath: string,
+  ): void {
+    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
+    if (pinnedProjectFolderPath === null) {
+      return;
+    }
+    const absoluteChildFolderPath = nodePath.resolve(
+      pinnedProjectFolderPath,
+      relativeChildFolderPath,
+    );
+    void shell.openPath(absoluteChildFolderPath);
   }
 
   function openAbsoluteMarkdownFilePath(absoluteMarkdownFilePath: string): void {
@@ -1251,157 +1279,164 @@
     />
   {/if}
 
-  <main class="widget-grid">
-    {#if visibleWidgetIdentifiersOnActiveSubTab.has("recent-files")}
-      <div class="widget-cell">
-        <RecentFiles
-          recentlyModifiedFiles={$recentlyModifiedFilesData.recentlyModifiedFiles}
-          totalRecentlyModifiedCount={$recentlyModifiedFilesData.totalRecentlyModifiedCount}
-          recencyWindowLabel={$recentlyModifiedFilesData.recencyWindowLabel}
-          viewState={$recentlyModifiedFilesData.recentlyModifiedFiles.length === 0
-            ? "empty"
-            : "data"}
-          isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("recent-files")}
-          onToggleCollapsed={() => handleToggleWidgetCollapsed("recent-files")}
-          onSelectFile={handleSelectRecentFile}
-        />
-      </div>
-    {/if}
+  {#if selectedPinnedProjectForDetail !== null}
+    <PinnedProjectDetail
+      pinnedProject={selectedPinnedProjectForDetail}
+      shellCommandRunsByKey={$shellCommandRunsForWidgetData}
+      onBack={handleReturnToPinnedProjectOverview}
+      onOpenChildFile={handleOpenPinnedProjectChildFile}
+      onOpenChildFolder={handleOpenPinnedProjectChildFolder}
+      onRunShellCommand={handleRunPinnedProjectShellCommand}
+      onKillShellCommand={handleKillPinnedProjectShellCommand}
+      onClearShellCommandOutput={handleClearPinnedProjectShellCommandOutput}
+      onCopyClaudeResumeCommand={handleCopyClaudeResumeCommandToClipboard}
+      onRelaunchClaudeSession={handleRelaunchClaudeSession}
+      onStartSessionFromProjectGoals={handleStartClaudeSessionFromProjectGoals}
+      onCreateProjectGoalsFile={handleCreateProjectGoalsFile}
+      onOpenProjectGoalsFile={handleOpenProjectGoalsFile}
+      onCollectOpenTasksIntoProjectGoals={handleCollectOpenTasksIntoProjectGoals}
+      onOpenJiraIssueInBrowser={handleOpenJiraIssueInBrowser}
+      onStartClaudeSessionFromJiraIssue={handleStartClaudeSessionFromJiraIssue}
+    />
+  {:else}
+    <main class="widget-grid">
+      {#if visibleWidgetIdentifiersOnActiveSubTab.has("recent-files")}
+        <div class="widget-cell">
+          <RecentFiles
+            recentlyModifiedFiles={$recentlyModifiedFilesData.recentlyModifiedFiles}
+            totalRecentlyModifiedCount={$recentlyModifiedFilesData.totalRecentlyModifiedCount}
+            recencyWindowLabel={$recentlyModifiedFilesData.recencyWindowLabel}
+            viewState={$recentlyModifiedFilesData.recentlyModifiedFiles.length === 0
+              ? "empty"
+              : "data"}
+            isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("recent-files")}
+            onToggleCollapsed={() => handleToggleWidgetCollapsed("recent-files")}
+            onSelectFile={handleSelectRecentFile}
+          />
+        </div>
+      {/if}
 
-    {#if visibleWidgetIdentifiersOnActiveSubTab.has("daily-tasks")}
-      <div class="widget-cell">
-        <DailyTasks
-          isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("daily-tasks")}
-          onToggleCollapsed={() => handleToggleWidgetCollapsed("daily-tasks")}
-          openTasks={$openTasksData.openTasks}
-          totalOpenTaskCount={$openTasksData.totalOpenTaskCount}
-          tasksCreatedTodayCount={$openTasksData.tasksCreatedTodayCount}
-          todayDailyNoteLabel={$openTasksData.todayDailyNoteLabel}
-          todayDailyNoteExists={$openTasksData.todayDailyNoteExists}
-          todayIsWorkingDay={$nextWorkdayData.todayIsWorkingDay}
-          nextWorkdayHeadingLabel={$nextWorkdayData.nextWorkdayHeadingLabel}
-          nextWorkdayNoteExists={$nextWorkdayData.nextWorkdayNoteExists}
-          nextWorkdayQueuedTasks={$nextWorkdayData.nextWorkdayQueuedTasks}
-          viewState="data"
-          onSelectTask={handleSelectTask}
-          onOpenDailyNote={handleOpenDailyNote}
-          onCreateDailyNote={handleCreateDailyNote}
-          onAddDailyTask={handleAddDailyTask}
-          onRollOverOpenTasks={handleRollOverOpenTasks}
-          onAddNextWorkdayTask={handleAddTaskForNextWorkday}
-          onOpenNextWorkdayNote={handleOpenNextWorkdayNote}
-        />
-      </div>
-    {/if}
+      {#if visibleWidgetIdentifiersOnActiveSubTab.has("daily-tasks")}
+        <div class="widget-cell">
+          <DailyTasks
+            isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("daily-tasks")}
+            onToggleCollapsed={() => handleToggleWidgetCollapsed("daily-tasks")}
+            openTasks={$openTasksData.openTasks}
+            totalOpenTaskCount={$openTasksData.totalOpenTaskCount}
+            tasksCreatedTodayCount={$openTasksData.tasksCreatedTodayCount}
+            todayDailyNoteLabel={$openTasksData.todayDailyNoteLabel}
+            todayDailyNoteExists={$openTasksData.todayDailyNoteExists}
+            todayIsWorkingDay={$nextWorkdayData.todayIsWorkingDay}
+            nextWorkdayHeadingLabel={$nextWorkdayData.nextWorkdayHeadingLabel}
+            nextWorkdayNoteExists={$nextWorkdayData.nextWorkdayNoteExists}
+            nextWorkdayQueuedTasks={$nextWorkdayData.nextWorkdayQueuedTasks}
+            viewState="data"
+            onSelectTask={handleSelectTask}
+            onOpenDailyNote={handleOpenDailyNote}
+            onCreateDailyNote={handleCreateDailyNote}
+            onAddDailyTask={handleAddDailyTask}
+            onRollOverOpenTasks={handleRollOverOpenTasks}
+            onAddNextWorkdayTask={handleAddTaskForNextWorkday}
+            onOpenNextWorkdayNote={handleOpenNextWorkdayNote}
+          />
+        </div>
+      {/if}
 
-    {#if visibleWidgetIdentifiersOnActiveSubTab.has("tag-folder-stats")}
-      <div class="widget-cell">
-        <TagFolderStats
-          isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("tag-folder-stats")}
-          onToggleCollapsed={() => handleToggleWidgetCollapsed("tag-folder-stats")}
-          topTags={$tagFolderStatsData.topTags}
-          topFolders={$tagFolderStatsData.topFolders}
-          untaggedNoteCount={$tagFolderStatsData.untaggedNoteCount}
-          viewState={$tagFolderStatsData.topTags.length === 0 &&
-          $tagFolderStatsData.topFolders.length === 0
-            ? "empty"
-            : "data"}
-          onSelectTag={handleSelectTagFromStats}
-          onSelectFolder={handleSelectFolderFromStats}
-          onShowUntaggedNotes={handleShowUntaggedNotesFromStats}
-        />
-      </div>
-    {/if}
+      {#if visibleWidgetIdentifiersOnActiveSubTab.has("tag-folder-stats")}
+        <div class="widget-cell">
+          <TagFolderStats
+            isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("tag-folder-stats")}
+            onToggleCollapsed={() => handleToggleWidgetCollapsed("tag-folder-stats")}
+            topTags={$tagFolderStatsData.topTags}
+            topFolders={$tagFolderStatsData.topFolders}
+            untaggedNoteCount={$tagFolderStatsData.untaggedNoteCount}
+            viewState={$tagFolderStatsData.topTags.length === 0 &&
+            $tagFolderStatsData.topFolders.length === 0
+              ? "empty"
+              : "data"}
+            onSelectTag={handleSelectTagFromStats}
+            onSelectFolder={handleSelectFolderFromStats}
+            onShowUntaggedNotes={handleShowUntaggedNotesFromStats}
+          />
+        </div>
+      {/if}
 
-    {#if visibleWidgetIdentifiersOnActiveSubTab.has("graph-insights")}
-      <div class="widget-cell">
-        <GraphInsights
-          isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("graph-insights")}
-          onToggleCollapsed={() => handleToggleWidgetCollapsed("graph-insights")}
-          orphanNoteCount={$graphInsightsData.orphanNoteCount}
-          orphanNotes={$graphInsightsData.orphanNotes}
-          hubNoteLabels={$graphInsightsData.hubNoteLabels}
-          hubNotes={$graphInsightsData.hubNotes}
-          brokenLinkCount={$graphInsightsData.brokenLinkCount}
-          brokenLinks={$graphInsightsData.brokenLinks}
-          mostLinkedNoteFileName={$graphInsightsData.mostLinkedNoteFileName}
-          mostLinkedNoteFilePath={$graphInsightsData.mostLinkedNoteFilePath}
-          mostLinkedNoteIncomingLinkCount={$graphInsightsData.mostLinkedNoteIncomingLinkCount}
-          mostLinkingNoteFileName={$graphInsightsData.mostLinkingNoteFileName}
-          mostLinkingNoteFilePath={$graphInsightsData.mostLinkingNoteFilePath}
-          mostLinkingNoteOutgoingLinkCount={$graphInsightsData.mostLinkingNoteOutgoingLinkCount}
-          viewState="data"
-          onOpenFileByPath={handleOpenFileInActiveLeaf}
-        />
-      </div>
-    {/if}
+      {#if visibleWidgetIdentifiersOnActiveSubTab.has("graph-insights")}
+        <div class="widget-cell">
+          <GraphInsights
+            isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("graph-insights")}
+            onToggleCollapsed={() => handleToggleWidgetCollapsed("graph-insights")}
+            orphanNoteCount={$graphInsightsData.orphanNoteCount}
+            orphanNotes={$graphInsightsData.orphanNotes}
+            hubNoteLabels={$graphInsightsData.hubNoteLabels}
+            hubNotes={$graphInsightsData.hubNotes}
+            brokenLinkCount={$graphInsightsData.brokenLinkCount}
+            brokenLinks={$graphInsightsData.brokenLinks}
+            mostLinkedNoteFileName={$graphInsightsData.mostLinkedNoteFileName}
+            mostLinkedNoteFilePath={$graphInsightsData.mostLinkedNoteFilePath}
+            mostLinkedNoteIncomingLinkCount={$graphInsightsData.mostLinkedNoteIncomingLinkCount}
+            mostLinkingNoteFileName={$graphInsightsData.mostLinkingNoteFileName}
+            mostLinkingNoteFilePath={$graphInsightsData.mostLinkingNoteFilePath}
+            mostLinkingNoteOutgoingLinkCount={$graphInsightsData.mostLinkingNoteOutgoingLinkCount}
+            viewState="data"
+            onOpenFileByPath={handleOpenFileInActiveLeaf}
+          />
+        </div>
+      {/if}
 
-    {#if visibleWidgetIdentifiersOnActiveSubTab.has("procrast-ideas")}
-      <div class="widget-cell widget-cell-wide">
-        <ProcrastIdeas
-          isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("procrast-ideas")}
-          onToggleCollapsed={() => handleToggleWidgetCollapsed("procrast-ideas")}
-          procrastSnapshot={$procrastIdeasSnapshotData}
-          relevanceTerms={procrastIdeaRelevanceTerms}
-          onCopyIdeaUuid={handleCopyProcrastIdeaUuid}
-          onPlanHere={handlePlanProcrastIdeaHere}
-          onMarkDone={handleMarkProcrastIdeaDone}
-          onShowDetails={handleShowProcrastIdeaDetails}
-          onRefresh={() => void procrastIdeasStore.refresh()}
-        />
-      </div>
-    {/if}
+      {#if visibleWidgetIdentifiersOnActiveSubTab.has("procrast-ideas")}
+        <div class="widget-cell widget-cell-wide">
+          <ProcrastIdeas
+            isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("procrast-ideas")}
+            onToggleCollapsed={() => handleToggleWidgetCollapsed("procrast-ideas")}
+            procrastSnapshot={$procrastIdeasSnapshotData}
+            relevanceTerms={procrastIdeaRelevanceTerms}
+            onCopyIdeaUuid={handleCopyProcrastIdeaUuid}
+            onPlanHere={handlePlanProcrastIdeaHere}
+            onMarkDone={handleMarkProcrastIdeaDone}
+            onShowDetails={handleShowProcrastIdeaDetails}
+            onRefresh={() => void procrastIdeasStore.refresh()}
+          />
+        </div>
+      {/if}
 
-    {#if visibleWidgetIdentifiersOnActiveSubTab.has("pinned-projects")}
-      <div class="widget-cell widget-cell-wide">
-        <PinnedProjects
-          isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("pinned-projects")}
-          onToggleCollapsed={() => handleToggleWidgetCollapsed("pinned-projects")}
-          pinnedProjects={$pinnedProjectsForWidgetData}
-          viewState={$pinnedProjectsForWidgetData.length === 0 ? "empty" : "data"}
-          shellCommandRunsByKey={$shellCommandRunsForWidgetData}
-          onToggleProjectExpansion={handleTogglePinnedProjectExpansion}
-          onOpenChildFile={handleOpenPinnedProjectChildFile}
-          onRunShellCommand={handleRunPinnedProjectShellCommand}
-          onKillShellCommand={handleKillPinnedProjectShellCommand}
-          onClearShellCommandOutput={handleClearPinnedProjectShellCommandOutput}
-          onCopyClaudeResumeCommand={handleCopyClaudeResumeCommandToClipboard}
-          onRelaunchClaudeSession={handleRelaunchClaudeSession}
-          onStartSessionFromProjectGoals={handleStartClaudeSessionFromProjectGoals}
-          onCreateProjectGoalsFile={handleCreateProjectGoalsFile}
-          onOpenProjectGoalsFile={handleOpenProjectGoalsFile}
-          onCollectOpenTasksIntoProjectGoals={handleCollectOpenTasksIntoProjectGoals}
-          onOpenJiraIssueInBrowser={handleOpenJiraIssueInBrowser}
-          onStartClaudeSessionFromJiraIssue={handleStartClaudeSessionFromJiraIssue}
-          onShowAllJiraIssues={handleShowAllJiraIssuesForProject}
-        />
-      </div>
-    {/if}
+      {#if visibleWidgetIdentifiersOnActiveSubTab.has("pinned-projects")}
+        <div class="widget-cell widget-cell-wide">
+          <PinnedProjects
+            isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("pinned-projects")}
+            onToggleCollapsed={() => handleToggleWidgetCollapsed("pinned-projects")}
+            pinnedProjects={$pinnedProjectsForWidgetData}
+            viewState={$pinnedProjectsForWidgetData.length === 0 ? "empty" : "data"}
+            onOpenProjectDetail={handleOpenPinnedProjectDetail}
+          />
+        </div>
+      {/if}
 
-    {#if visibleWidgetIdentifiersOnActiveSubTab.has("jira-issues")}
-      <div class="widget-cell widget-cell-wide">
-        <JiraIssues
-          isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("jira-issues")}
-          onToggleCollapsed={() => handleToggleWidgetCollapsed("jira-issues")}
-          jiraSnapshot={$jiraSnapshotData}
-          onRefresh={handleRefreshJiraIssues}
-          onOpenIssueInBrowser={handleOpenJiraIssueInBrowser}
-        />
-      </div>
-    {/if}
+      {#if visibleWidgetIdentifiersOnActiveSubTab.has("jira-issues")}
+        <div class="widget-cell widget-cell-wide">
+          <JiraIssues
+            isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("jira-issues")}
+            onToggleCollapsed={() => handleToggleWidgetCollapsed("jira-issues")}
+            jiraSnapshot={$jiraSnapshotData}
+            onRefresh={handleRefreshJiraIssues}
+            onOpenIssueInBrowser={handleOpenJiraIssueInBrowser}
+          />
+        </div>
+      {/if}
 
-    {#if visibleWidgetIdentifiersOnActiveSubTab.has("claude-sessions")}
-      <div class="widget-cell widget-cell-wide">
-        <ClaudeSessions
-          isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("claude-sessions")}
-          onToggleCollapsed={() => handleToggleWidgetCollapsed("claude-sessions")}
-          pinnedProjects={$pinnedProjectsForWidgetData}
-          onCopyClaudeResumeCommand={handleCopyClaudeResumeCommandToClipboard}
-          onRelaunchClaudeSession={handleRelaunchClaudeSession}
-        />
-      </div>
-    {/if}
-  </main>
+      {#if visibleWidgetIdentifiersOnActiveSubTab.has("claude-sessions")}
+        <div class="widget-cell widget-cell-wide">
+          <ClaudeSessions
+            isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("claude-sessions")}
+            onToggleCollapsed={() => handleToggleWidgetCollapsed("claude-sessions")}
+            pinnedProjects={$pinnedProjectsForWidgetData}
+            onCopyClaudeResumeCommand={handleCopyClaudeResumeCommandToClipboard}
+            onRelaunchClaudeSession={handleRelaunchClaudeSession}
+          />
+        </div>
+      {/if}
+    </main>
+  {/if}
 </div>
 
 <style>
@@ -1424,6 +1459,11 @@
     padding: var(--vault-dashboard-space-pane);
     overflow: auto;
     align-items: start;
+  }
+
+  :global(.project-detail-page-shell) {
+    overflow: auto;
+    padding: var(--vault-dashboard-space-pane);
   }
 
   .widget-cell {

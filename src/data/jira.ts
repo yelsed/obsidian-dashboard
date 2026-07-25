@@ -13,6 +13,23 @@ export type JiraAvailability =
   | "authentication-failed"
   | "errored";
 
+export type JiraSprintSummary = {
+  sprintId: string;
+  sprintName: string;
+  sprintState: string | null;
+  startDateIsoString: string | null;
+  endDateIsoString: string | null;
+  completeDateIsoString: string | null;
+};
+
+export type JiraIssueParentSummary = {
+  issueKey: string;
+  summaryText: string;
+  issueTypeName: string | null;
+  issueTypeIsSubtask: boolean;
+  issueBrowserUrl: string;
+};
+
 export type JiraIssueSummary = {
   issueKey: string;
   summaryText: string;
@@ -24,6 +41,12 @@ export type JiraIssueSummary = {
   dueDateIsoString: string | null;
   updatedIsoString: string | null;
   issueBrowserUrl: string;
+  issueTypeName: string | null;
+  issueTypeIsSubtask: boolean;
+  issueTypeHierarchyLevel: number | null;
+  parentIssue: JiraIssueParentSummary | null;
+  epicIssueKey: string | null;
+  sprints: JiraSprintSummary[];
 };
 
 export type JiraSnapshot = {
@@ -51,7 +74,7 @@ export type JiraConnectionTestResult =
 
 const JIRA_POLLING_INTERVAL_MILLISECONDS = 300_000;
 const JIRA_MAXIMUM_ISSUES_PER_QUERY = 50;
-const JIRA_SEARCH_FIELDS = [
+const JIRA_BASE_SEARCH_FIELDS = [
   "summary",
   "status",
   "priority",
@@ -59,7 +82,15 @@ const JIRA_SEARCH_FIELDS = [
   "assignee",
   "project",
   "updated",
+  "issuetype",
+  "parent",
+  "subtasks",
 ];
+
+type JiraFieldMetadata = {
+  sprintFieldId: string | null;
+  epicLinkFieldId: string | null;
+};
 
 const NOT_CONFIGURED_SNAPSHOT: JiraSnapshot = {
   jiraAvailability: "not-configured",
@@ -81,6 +112,87 @@ export function createJiraIssuesStore(): JiraIssuesStore {
   let pollingIntervalHandle: ReturnType<typeof setInterval> | null = null;
   let isRefreshInFlight = false;
   let mostRecentlyPublishedAvailability: JiraAvailability = "not-configured";
+  const fieldMetadataBySiteDomain = new Map<string, JiraFieldMetadata>();
+
+  async function fetchJiraFieldMetadata(
+    connection: JiraConnectionSettings,
+  ): Promise<JiraFieldMetadata> {
+    const siteDomain = connection.siteDomain.trim();
+    const cachedMetadata = fieldMetadataBySiteDomain.get(siteDomain);
+    if (cachedMetadata !== undefined) {
+      return cachedMetadata;
+    }
+
+    const emptyMetadata: JiraFieldMetadata = {
+      sprintFieldId: null,
+      epicLinkFieldId: null,
+    };
+
+    let response: RequestUrlResponse;
+    try {
+      response = await requestUrl({
+        url: `https://${siteDomain}/rest/api/3/field`,
+        method: "GET",
+        headers: {
+          Authorization: buildBasicAuthorizationHeader(connection),
+          Accept: "application/json",
+        },
+        throw: false,
+      });
+    } catch {
+      fieldMetadataBySiteDomain.set(siteDomain, emptyMetadata);
+      return emptyMetadata;
+    }
+
+    if (!responseStatusIndicatesSuccess(response.status)) {
+      fieldMetadataBySiteDomain.set(siteDomain, emptyMetadata);
+      return emptyMetadata;
+    }
+
+    let sprintFieldId: string | null = null;
+    let epicLinkFieldId: string | null = null;
+    try {
+      const rawFields = response.json;
+      if (!Array.isArray(rawFields)) {
+        fieldMetadataBySiteDomain.set(siteDomain, emptyMetadata);
+        return emptyMetadata;
+      }
+      for (const rawField of rawFields) {
+        const fieldRecord = asRecordOrEmpty(rawField);
+        const fieldId = typeof fieldRecord.id === "string" ? fieldRecord.id : null;
+        if (fieldId === null) {
+          continue;
+        }
+        const lowerName =
+          typeof fieldRecord.name === "string" ? fieldRecord.name.toLowerCase() : "";
+        const schemaRecord = asRecordOrEmpty(fieldRecord.schema);
+        const schemaCustom =
+          typeof schemaRecord.custom === "string" ? schemaRecord.custom.toLowerCase() : "";
+        if (
+          sprintFieldId === null &&
+          (lowerName === "sprint" || schemaCustom.includes(":sprint"))
+        ) {
+          sprintFieldId = fieldId;
+        }
+        if (
+          epicLinkFieldId === null &&
+          (lowerName === "epic link" || schemaCustom.includes(":gh-epic-link"))
+        ) {
+          epicLinkFieldId = fieldId;
+        }
+        if (sprintFieldId !== null && epicLinkFieldId !== null) {
+          break;
+        }
+      }
+    } catch {
+      fieldMetadataBySiteDomain.set(siteDomain, emptyMetadata);
+      return emptyMetadata;
+    }
+
+    const metadata = { sprintFieldId, epicLinkFieldId };
+    fieldMetadataBySiteDomain.set(siteDomain, metadata);
+    return metadata;
+  }
 
   function publishSnapshot(snapshot: JiraSnapshot): void {
     mostRecentlyPublishedAvailability = snapshot.jiraAvailability;
@@ -110,7 +222,12 @@ export function createJiraIssuesStore(): JiraIssuesStore {
           lastRefreshedAtEpochMilliseconds: null,
         });
       }
-      const nextSnapshot = await fetchJiraIssuesSnapshot(currentConnection, projectKeysToQuery);
+      const fieldMetadata = await fetchJiraFieldMetadata(currentConnection);
+      const nextSnapshot = await fetchJiraIssuesSnapshot(
+        currentConnection,
+        projectKeysToQuery,
+        fieldMetadata,
+      );
       publishSnapshot(nextSnapshot);
     } finally {
       isRefreshInFlight = false;
@@ -442,11 +559,13 @@ export async function testJiraConnection(
 async function fetchJiraIssuesSnapshot(
   connection: JiraConnectionSettings,
   projectKeys: JiraProjectKey[],
+  fieldMetadata: JiraFieldMetadata,
 ): Promise<JiraSnapshot> {
   const jiraQueryLanguageString = buildJiraQueryLanguageString(
     projectKeys,
     connection.showOnlyIssuesAssignedToCurrentUser,
   );
+  const searchFields = buildJiraSearchFields(fieldMetadata);
 
   let response: RequestUrlResponse;
   try {
@@ -456,7 +575,7 @@ async function fetchJiraIssuesSnapshot(
       // attaches an Origin header that Jira Cloud's edge rejects with 403 on
       // POST, while GET (the same shape as /myself) is accepted. /search/jql is
       // the current enhanced JQL search; legacy GET/POST /search is being removed.
-      url: buildJiraSearchUrl(connection.siteDomain.trim(), jiraQueryLanguageString),
+      url: buildJiraSearchUrl(connection.siteDomain.trim(), jiraQueryLanguageString, searchFields),
       method: "GET",
       headers: {
         Authorization: buildBasicAuthorizationHeader(connection),
@@ -480,7 +599,7 @@ async function fetchJiraIssuesSnapshot(
     return buildErroredSnapshot(describeUnsuccessfulResponse(response));
   }
 
-  const issues = parseJiraIssuesFromResponse(response, connection.siteDomain.trim());
+  const issues = parseJiraIssuesFromResponse(response, connection.siteDomain.trim(), fieldMetadata);
   return {
     jiraAvailability: "available",
     issues,
@@ -489,13 +608,29 @@ async function fetchJiraIssuesSnapshot(
   };
 }
 
-function buildJiraSearchUrl(siteDomain: string, jiraQueryLanguageString: string): string {
+function buildJiraSearchUrl(
+  siteDomain: string,
+  jiraQueryLanguageString: string,
+  searchFields: string[],
+): string {
   const queryParameters = new URLSearchParams({
     jql: jiraQueryLanguageString,
-    fields: JIRA_SEARCH_FIELDS.join(","),
+    fields: searchFields.join(","),
     maxResults: String(JIRA_MAXIMUM_ISSUES_PER_QUERY),
   });
   return `https://${siteDomain}/rest/api/3/search/jql?${queryParameters.toString()}`;
+}
+
+function buildJiraSearchFields(fieldMetadata: JiraFieldMetadata): string[] {
+  return Array.from(
+    new Set(
+      [
+        ...JIRA_BASE_SEARCH_FIELDS,
+        fieldMetadata.sprintFieldId,
+        fieldMetadata.epicLinkFieldId,
+      ].filter((fieldId): fieldId is string => fieldId !== null),
+    ),
+  );
 }
 
 function buildJiraQueryLanguageString(
@@ -510,7 +645,7 @@ function buildJiraQueryLanguageString(
     ? " AND assignee = currentUser()"
     : "";
 
-  return `project IN (${quotedProjectKeys}) AND statusCategory != Done${assigneeClause} ORDER BY updated DESC`;
+  return `project IN (${quotedProjectKeys}) AND statusCategory != Done${assigneeClause} ORDER BY Rank ASC, updated DESC`;
 }
 
 function buildBasicAuthorizationHeader(connection: JiraConnectionSettings): string {
@@ -521,6 +656,7 @@ function buildBasicAuthorizationHeader(connection: JiraConnectionSettings): stri
 function parseJiraIssuesFromResponse(
   response: RequestUrlResponse,
   siteDomain: string,
+  fieldMetadata: JiraFieldMetadata,
 ): JiraIssueSummary[] {
   const responseRecord = readJsonObject(response);
   if (responseRecord === null || !Array.isArray(responseRecord.issues)) {
@@ -529,7 +665,7 @@ function parseJiraIssuesFromResponse(
 
   const parsedIssues: JiraIssueSummary[] = [];
   for (const rawIssue of responseRecord.issues) {
-    const parsedIssue = parseOneJiraIssue(rawIssue, siteDomain);
+    const parsedIssue = parseOneJiraIssue(rawIssue, siteDomain, fieldMetadata);
     if (parsedIssue !== null) {
       parsedIssues.push(parsedIssue);
     }
@@ -537,7 +673,11 @@ function parseJiraIssuesFromResponse(
   return parsedIssues;
 }
 
-function parseOneJiraIssue(rawIssue: unknown, siteDomain: string): JiraIssueSummary | null {
+function parseOneJiraIssue(
+  rawIssue: unknown,
+  siteDomain: string,
+  fieldMetadata: JiraFieldMetadata,
+): JiraIssueSummary | null {
   if (rawIssue === null || typeof rawIssue !== "object") {
     return null;
   }
@@ -553,6 +693,49 @@ function parseOneJiraIssue(rawIssue: unknown, siteDomain: string): JiraIssueSumm
   const priorityRecord = asRecordOrEmpty(fieldsRecord.priority);
   const assigneeRecord = asRecordOrEmpty(fieldsRecord.assignee);
   const projectRecord = asRecordOrEmpty(fieldsRecord.project);
+  const issueTypeRecord = asRecordOrEmpty(fieldsRecord.issuetype);
+  const issueTypeName = typeof issueTypeRecord.name === "string" ? issueTypeRecord.name : null;
+  const issueTypeHierarchyLevel =
+    typeof issueTypeRecord.hierarchyLevel === "number" &&
+    Number.isFinite(issueTypeRecord.hierarchyLevel)
+      ? issueTypeRecord.hierarchyLevel
+      : null;
+  const parentRecord = asRecordOrEmpty(fieldsRecord.parent);
+  const parentIssueKey = typeof parentRecord.key === "string" ? parentRecord.key : "";
+  const parentFieldsRecord = asRecordOrEmpty(parentRecord.fields);
+  const parentIssueTypeRecord = asRecordOrEmpty(parentFieldsRecord.issuetype);
+  const parentIssueTypeName =
+    typeof parentIssueTypeRecord.name === "string" ? parentIssueTypeRecord.name : null;
+  const parentIssueTypeHierarchyLevel =
+    typeof parentIssueTypeRecord.hierarchyLevel === "number" &&
+    Number.isFinite(parentIssueTypeRecord.hierarchyLevel)
+      ? parentIssueTypeRecord.hierarchyLevel
+      : null;
+  const parentIssue =
+    parentIssueKey.length > 0
+      ? {
+          issueKey: parentIssueKey,
+          summaryText:
+            typeof parentFieldsRecord.summary === "string" ? parentFieldsRecord.summary : "",
+          issueTypeName: parentIssueTypeName,
+          issueTypeIsSubtask: parentIssueTypeRecord.subtask === true,
+          issueBrowserUrl: `https://${siteDomain}/browse/${parentIssueKey}`,
+        }
+      : null;
+  const customEpicFieldValue =
+    fieldMetadata.epicLinkFieldId === null ? null : fieldsRecord[fieldMetadata.epicLinkFieldId];
+  const customEpicIssueKey =
+    typeof customEpicFieldValue === "string" && customEpicFieldValue.length > 0
+      ? customEpicFieldValue
+      : null;
+  const epicIssueKey =
+    parentIssue !== null && parentIssue.issueTypeName === "Epic"
+      ? parentIssue.issueKey
+      : parentIssue !== null &&
+          parentIssueTypeHierarchyLevel !== null &&
+          parentIssueTypeHierarchyLevel > 0
+        ? parentIssue.issueKey
+        : customEpicIssueKey;
 
   return {
     issueKey,
@@ -567,7 +750,81 @@ function parseOneJiraIssue(rawIssue: unknown, siteDomain: string): JiraIssueSumm
     dueDateIsoString: typeof fieldsRecord.duedate === "string" ? fieldsRecord.duedate : null,
     updatedIsoString: typeof fieldsRecord.updated === "string" ? fieldsRecord.updated : null,
     issueBrowserUrl: `https://${siteDomain}/browse/${issueKey}`,
+    issueTypeName,
+    issueTypeIsSubtask: issueTypeRecord.subtask === true,
+    issueTypeHierarchyLevel,
+    parentIssue,
+    epicIssueKey,
+    sprints:
+      fieldMetadata.sprintFieldId === null
+        ? []
+        : parseJiraSprintsFromField(fieldsRecord[fieldMetadata.sprintFieldId]),
   };
+}
+
+function parseJiraSprintsFromField(rawSprintField: unknown): JiraSprintSummary[] {
+  const rawSprintEntries = Array.isArray(rawSprintField) ? rawSprintField : [rawSprintField];
+  const parsedSprints: JiraSprintSummary[] = [];
+  for (const rawSprintEntry of rawSprintEntries) {
+    const parsedSprint =
+      typeof rawSprintEntry === "string"
+        ? parseLegacyJiraSprintString(rawSprintEntry)
+        : parseJiraSprintObject(rawSprintEntry);
+    if (parsedSprint !== null) {
+      parsedSprints.push(parsedSprint);
+    }
+  }
+  return parsedSprints;
+}
+
+function parseJiraSprintObject(rawSprintEntry: unknown): JiraSprintSummary | null {
+  const sprintRecord = asRecordOrEmpty(rawSprintEntry);
+  const rawSprintId = sprintRecord.id;
+  const sprintId =
+    typeof rawSprintId === "string"
+      ? rawSprintId
+      : typeof rawSprintId === "number" && Number.isFinite(rawSprintId)
+        ? String(rawSprintId)
+        : "";
+  const sprintName = typeof sprintRecord.name === "string" ? sprintRecord.name : "";
+  if (sprintId.length === 0 || sprintName.length === 0) {
+    return null;
+  }
+  return {
+    sprintId,
+    sprintName,
+    sprintState: typeof sprintRecord.state === "string" ? sprintRecord.state : null,
+    startDateIsoString:
+      typeof sprintRecord.startDate === "string" ? sprintRecord.startDate : null,
+    endDateIsoString: typeof sprintRecord.endDate === "string" ? sprintRecord.endDate : null,
+    completeDateIsoString:
+      typeof sprintRecord.completeDate === "string" ? sprintRecord.completeDate : null,
+  };
+}
+
+function parseLegacyJiraSprintString(rawSprintEntry: string): JiraSprintSummary | null {
+  const sprintId = readLegacyJiraSprintStringValue(rawSprintEntry, "id");
+  const sprintName = readLegacyJiraSprintStringValue(rawSprintEntry, "name");
+  if (sprintId === null || sprintName === null) {
+    return null;
+  }
+  return {
+    sprintId,
+    sprintName,
+    sprintState: readLegacyJiraSprintStringValue(rawSprintEntry, "state"),
+    startDateIsoString: null,
+    endDateIsoString: null,
+    completeDateIsoString: null,
+  };
+}
+
+function readLegacyJiraSprintStringValue(
+  rawSprintEntry: string,
+  fieldName: string,
+): string | null {
+  const escapedFieldName = fieldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = rawSprintEntry.match(new RegExp(`${escapedFieldName}=([^,\\]]+)`));
+  return match === null || match[1].length === 0 ? null : match[1];
 }
 
 function buildErroredSnapshot(errorMessage: string): JiraSnapshot {

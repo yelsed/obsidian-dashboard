@@ -191,53 +191,74 @@ Rules:
 
 ---
 
-## Pinned projects widget (with Docker indicator)
+## Pinned projects widget and detail page
 
 ```
-┌─ PINNED PROJECTS ───────────────────────────────────────────────────┐
-│ /fivespark        [███ ] 3/4 up    ●  2h ago    7 notes   ▸         │
-│ /yelsed           [    ] idle      ○  1d ago    3 notes   ▸         │
-│ /procrast-cli     [█   ] 1/2 up    ●  5h ago    1 note    ▸         │
-│ /learning         [    ] no docker ·  3d ago    9 notes   ▸         │
-│                                                                     │
-│ + Pin folder                                                        │
-└─────────────────────────────────────────────────────────────────────┘
+┌─ PINNED PROJECTS ─────────────────────────────────────────────────────────────┐
+│ /fivespark      [███ ] 3/4 up  jira 12  ● 2h ago  7 notes  claude 1h  ▸     │
+│ /yelsed         [    ] idle             ○ 1d ago  3 notes             ▸     │
+│ /procrast-cli   [█   ] 1/2 up  jira 4   ● 5h ago  1 note   idea ab12  ▸     │
+│ /learning       [    ] no docker        · 3d ago  9 notes             ▸     │
+│                                                                              │
+│ + Pin folder                                                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Per project card, left to right:
+The overview is a compact full-width list: one row per pinned project, no
+inline expansion and no per-project action buttons. Row columns, left to right:
 
-1. **Folder path**, rendered with leading slash.
+1. **Display name or folder path**, with the folder path shown as secondary text
+   when a custom display name exists.
 2. **Docker container bar** — `[████]` segments where each filled cell is a
    running container, up to four. Beyond four, render `[████+]`.
 3. **Docker count summary** — `3/4 up`, `idle` (no containers paired but Docker
    is reachable), `no docker` (Docker CLI not on `$PATH`).
-4. **Freshness dot** — `●` (active <7d, green), `◐` (cooling <30d, yellow),
-   `○` (cold ≥30d, faint).
-5. **Last modified relative timestamp**.
-6. **Markdown-file count inside the folder.**
-7. **Expand chevron** — clicking expands inline.
+4. **Jira open count**, only when Jira is configured for the project.
+5. **Freshness glyph** — `●` (active <7d), `◐` (cooling <30d), `○` (cold ≥30d),
+   plus the last modified relative timestamp.
+6. **Markdown note count** inside the folder.
+7. **Last Claude Code session age**, when a session was found for the folder.
+8. **Origin badge**, when the project was pinned from Procrast.
+9. **Detail affordance** — `detail ▸`; clicking anywhere on the row opens the
+   page-level project detail view.
 
-**Expanded card**
+**Detail page**
 
 ```
-│ /fivespark        [███ ] 3/4 up    ●  2h ago    7 notes   ▾         │
-│   Containers                                                        │
-│     ● fivespark-api          up 2h    :8080  →                      │
-│     ● fivespark-worker       up 2h            →                     │
-│     ● fivespark-db           up 2h    :5432  →                      │
-│     ○ fivespark-storybook    stopped         →                      │
-│   Files                                                             │
-│     · README.md                                       2h            │
-│     · docs/architecture.md                            today         │
-│     · docs/release-notes.md                           today         │
-│     ... 4 more                                                      │
+← pinned projects
+
+/fivespark
+/Users/desleylangeveld/yelsed/fivespark
+
+[███ ] 3/4 up   jira 12   ● 2h ago   7 notes   claude 1h
+
+Project actions
+Jira issues
+Open tasks
+Containers
+Files
+Last Claude sessions
+Commands
 ```
 
-- Container rows use the same status dot system as the project header.
-- The `→` is a future affordance for "run a stored shell command in this
-  container's working directory" — wired in the backlog phase, but the icon
-  is reserved in the layout from MVP day one.
-- File rows open the markdown file in the main editor when clicked.
+The detail page is dashboard page state, not a modal. It replaces the widget
+grid until the user activates `← pinned projects` or switches dashboard tabs.
+It keeps the same square, hairline, monospace vocabulary as the rest of the
+dashboard and reuses `--vault-dashboard-*` theme variables.
+
+Section order is fixed: Project actions, Jira issues, Open tasks, Containers,
+Files, Last Claude sessions, Commands.
+The Files section renders markdown files as a collapsible folder tree. Folder
+names expand and collapse their children; the separate `open` action opens that
+folder with the system folder opener. File rows open the markdown file as before.
+Open tasks are collected only from task-bearing markdown files such as
+`GOALS.md`, `tasks.md`, `todo.md`, and their singular variants.
+
+Jira issues render as sprint → epic → task → subtask hierarchy while preserving
+Jira's returned rank order inside each group. Issues without a sprint go under
+`No sprint`; issues without an epic go under `No epic`; subtasks whose parent
+task is not in the fetched issue set go under `Subtasks without returned task`,
+with the parent key shown when Jira supplied it.
 
 **Empty state**
 
