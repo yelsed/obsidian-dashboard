@@ -140,13 +140,11 @@ export function createJiraIssuesStore(): JiraIssuesStore {
         throw: false,
       });
     } catch {
-      fieldMetadataBySiteDomain.set(siteDomain, emptyMetadata);
-      return emptyMetadata;
+      return rememberFieldMetadata(siteDomain, emptyMetadata);
     }
 
     if (!responseStatusIndicatesSuccess(response.status)) {
-      fieldMetadataBySiteDomain.set(siteDomain, emptyMetadata);
-      return emptyMetadata;
+      return rememberFieldMetadata(siteDomain, emptyMetadata);
     }
 
     let sprintFieldId: string | null = null;
@@ -154,8 +152,7 @@ export function createJiraIssuesStore(): JiraIssuesStore {
     try {
       const rawFields = response.json;
       if (!Array.isArray(rawFields)) {
-        fieldMetadataBySiteDomain.set(siteDomain, emptyMetadata);
-        return emptyMetadata;
+        return rememberFieldMetadata(siteDomain, emptyMetadata);
       }
       for (const rawField of rawFields) {
         const fieldRecord = asRecordOrEmpty(rawField);
@@ -163,20 +160,21 @@ export function createJiraIssuesStore(): JiraIssuesStore {
         if (fieldId === null) {
           continue;
         }
-        const lowerName =
+        const lowercaseFieldName =
           typeof fieldRecord.name === "string" ? fieldRecord.name.toLowerCase() : "";
         const schemaRecord = asRecordOrEmpty(fieldRecord.schema);
-        const schemaCustom =
+        const lowercaseCustomSchemaIdentifier =
           typeof schemaRecord.custom === "string" ? schemaRecord.custom.toLowerCase() : "";
         if (
           sprintFieldId === null &&
-          (lowerName === "sprint" || schemaCustom.includes(":sprint"))
+          (lowercaseFieldName === "sprint" || lowercaseCustomSchemaIdentifier.includes(":sprint"))
         ) {
           sprintFieldId = fieldId;
         }
         if (
           epicLinkFieldId === null &&
-          (lowerName === "epic link" || schemaCustom.includes(":gh-epic-link"))
+          (lowercaseFieldName === "epic link" ||
+            lowercaseCustomSchemaIdentifier.includes(":gh-epic-link"))
         ) {
           epicLinkFieldId = fieldId;
         }
@@ -185,11 +183,16 @@ export function createJiraIssuesStore(): JiraIssuesStore {
         }
       }
     } catch {
-      fieldMetadataBySiteDomain.set(siteDomain, emptyMetadata);
-      return emptyMetadata;
+      return rememberFieldMetadata(siteDomain, emptyMetadata);
     }
 
-    const metadata = { sprintFieldId, epicLinkFieldId };
+    return rememberFieldMetadata(siteDomain, { sprintFieldId, epicLinkFieldId });
+  }
+
+  function rememberFieldMetadata(
+    siteDomain: string,
+    metadata: JiraFieldMetadata,
+  ): JiraFieldMetadata {
     fieldMetadataBySiteDomain.set(siteDomain, metadata);
     return metadata;
   }

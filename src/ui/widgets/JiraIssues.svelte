@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { JiraIssueSummary, JiraSnapshot } from "../../data/jira";
-  import { buildJiraSprintEpicHierarchy } from "../jiraHierarchy";
+  import { buildJiraSprintEpicHierarchy, describeEpicGroupHeading } from "../jiraHierarchy";
   import WidgetPanel from "./WidgetPanel.svelte";
 
   const sampleSprint = {
@@ -94,11 +94,6 @@
     return dueDateIsoString === null ? "" : `due ${dueDateIsoString}`;
   }
 
-  function describeEpicHeading(epicKey: string, summaryText: string | null): string {
-    if (epicKey === "no-epic") return "No epic";
-    const issueKey = epicKey.startsWith("epic:") ? epicKey.slice(5) : epicKey;
-    return summaryText === null || summaryText.length === 0 ? issueKey : `${issueKey} — ${summaryText}`;
-  }
 
   $: sprintGroups = buildJiraSprintEpicHierarchy(jiraSnapshot.issues);
   $: hasAnyIssues = jiraSnapshot.issues.length > 0;
@@ -117,6 +112,7 @@
   {#if jiraSnapshot.jiraAvailability === "available" && hasAnyIssues}
     <div class="jira-column-header" aria-hidden="true">
       <span class="jira-column-label">issue</span>
+      <span class="jira-column-label"></span>
       <span class="jira-column-label jira-column-label-status">status</span>
       <span class="jira-column-label">due</span>
     </div>
@@ -127,7 +123,7 @@
           <ul class="jira-epic-list">
             {#each sprintGroup.epicGroups as epicGroup (epicGroup.epicKey)}
               <li class="jira-epic-group">
-                <h4 class="jira-epic-heading">{describeEpicHeading(epicGroup.epicKey, epicGroup.epicSummaryText)}</h4>
+                <h4 class="jira-epic-heading">{describeEpicGroupHeading(epicGroup.epicKey, epicGroup.epicSummaryText)}</h4>
                 <ul class="jira-task-list">
                   {#each epicGroup.tasks as taskNode (taskNode.taskIssue?.issueKey ?? taskNode.parentIssue?.issueKey ?? "task")}
                     {@const taskIssue = taskNode.taskIssue}
@@ -219,8 +215,14 @@
     white-space: nowrap;
   }
 
-  .jira-refresh-button:hover { color: var(--vault-dashboard-color-accent-cyan); }
-  .jira-refresh-button:focus-visible { outline: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-accent); outline-offset: 2px; }
+  .jira-refresh-button:hover {
+    color: var(--vault-dashboard-color-accent-cyan);
+  }
+
+  .jira-refresh-button:focus-visible {
+    outline: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-accent);
+    outline-offset: 2px;
+  }
 
   .jira-sprint-list,
   .jira-epic-list,
@@ -234,13 +236,15 @@
     gap: var(--vault-dashboard-space-row);
   }
 
-  .jira-sprint-list { gap: var(--vault-dashboard-space-panel-inner); }
+  .jira-sprint-list {
+    gap: var(--vault-dashboard-space-panel-inner);
+  }
 
-  /* Same trailing tracks as the issue rows, so "status" and "due" stand over the columns they
-     name. The leading 1fr stands in for the key + summary, which need no label. */
+  /* Mirrors the issue row track for track, so every label stands over the column it names. The
+     summary column carries an empty label cell rather than being folded into the key column. */
   .jira-column-header {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 12ch 15ch;
+    grid-template-columns: 12ch minmax(0, 1fr) 12ch 15ch;
     gap: var(--vault-dashboard-space-inline);
     padding-bottom: var(--vault-dashboard-space-row);
     margin-bottom: var(--vault-dashboard-space-row);
@@ -260,8 +264,14 @@
   .jira-column-label + .jira-column-label {
     text-align: left;
   }
-  .jira-epic-list { padding-left: var(--vault-dashboard-space-inline); }
-  .jira-subtask-list { padding-left: var(--vault-dashboard-space-panel-inner); }
+
+  .jira-epic-list {
+    padding-left: var(--vault-dashboard-space-inline);
+  }
+
+  .jira-subtask-list {
+    padding-left: var(--vault-dashboard-space-panel-inner);
+  }
 
   .jira-sprint-heading,
   .jira-epic-heading,
@@ -280,7 +290,7 @@
     /* Status and due are fixed tracks, and the due cell is always rendered even when empty. As
        trailing `auto` columns they were sized per row, so a "To Do" row and an "In Progress" row
        put their status in different places and the due dates never lined up. */
-    grid-template-columns: auto minmax(0, 1fr) 12ch 15ch;
+    grid-template-columns: 12ch minmax(0, 1fr) 12ch 15ch;
     align-items: baseline;
     gap: var(--vault-dashboard-space-inline);
     width: 100%;
@@ -294,18 +304,57 @@
     cursor: pointer;
   }
 
-  .jira-subtask-button { grid-template-columns: auto auto minmax(0, 1fr) 12ch 15ch; }
-  .jira-issue-button:hover { color: var(--vault-dashboard-color-accent-cyan); }
-  .jira-issue-button:focus-visible { outline: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-accent); outline-offset: 2px; }
+  .jira-subtask-button {
+    grid-template-columns: 2ch 12ch minmax(0, 1fr) 12ch 15ch;
+  }
 
-  .jira-issue-key { color: var(--vault-dashboard-color-accent-cyan); font-weight: var(--vault-dashboard-font-weight-bold); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .jira-issue-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--vault-dashboard-font-weight-medium); }
-  .jira-issue-status { color: var(--vault-dashboard-text-secondary); font-size: var(--vault-dashboard-font-size-label); font-style: italic; white-space: nowrap; }
-  .jira-issue-status[data-status-category="indeterminate"] { color: var(--vault-dashboard-color-freshness-cooling); }
-  .jira-issue-status[data-status-category="done"] { color: var(--vault-dashboard-color-status-running); }
+  .jira-issue-button:hover {
+    color: var(--vault-dashboard-color-accent-cyan);
+  }
+
+  .jira-issue-button:focus-visible {
+    outline: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-accent);
+    outline-offset: 2px;
+  }
+
+  .jira-issue-key {
+    color: var(--vault-dashboard-color-accent-cyan);
+    font-weight: var(--vault-dashboard-font-weight-bold);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .jira-issue-summary {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: var(--vault-dashboard-font-weight-medium);
+  }
+
+  .jira-issue-status {
+    color: var(--vault-dashboard-text-secondary);
+    font-size: var(--vault-dashboard-font-size-label);
+    font-style: italic;
+    white-space: nowrap;
+  }
+
+  .jira-issue-status[data-status-category="indeterminate"] {
+    color: var(--vault-dashboard-color-freshness-cooling);
+  }
+
+  .jira-issue-status[data-status-category="done"] {
+    color: var(--vault-dashboard-color-status-running);
+  }
+
   .jira-issue-due,
   .jira-subtask-glyph,
-  .jira-orphan-subtasks p { color: var(--vault-dashboard-text-faint); font-size: var(--vault-dashboard-font-size-label); font-style: italic; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .jira-orphan-subtasks p {
+    color: var(--vault-dashboard-text-faint);
+    font-size: var(--vault-dashboard-font-size-label);
+    font-style: italic;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
 
   /* 27ch of fixed status and due tracks leaves a narrow pane almost nothing for the summary, which
      is the only part worth reading. Below this width the row wraps and the header goes with it. */
@@ -342,8 +391,4 @@
     }
   }
 
-  .widget-empty { margin: 0; color: var(--vault-dashboard-text-secondary); }
-  .widget-error { margin: 0; color: var(--vault-dashboard-color-status-stopped); }
-  .widget-error-hint { margin: var(--vault-dashboard-space-row) 0 0 0; color: var(--vault-dashboard-text-secondary); font-size: var(--vault-dashboard-font-size-label); }
-  .row-shimmer { color: var(--vault-dashboard-text-faint); opacity: 0.5; }
 </style>

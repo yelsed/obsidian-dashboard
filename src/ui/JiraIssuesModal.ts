@@ -1,16 +1,15 @@
 import { App, Modal, Setting } from "obsidian";
+import { shell } from "electron";
 import type { JiraIssueSummary } from "../data/jira";
-import { buildJiraSprintEpicHierarchy } from "./jiraHierarchy";
+import { startClaudeSessionForJiraIssue } from "../data/jiraClaudeHandoff";
+import type { JiraConnectionSettings } from "../settings";
+import { buildJiraSprintEpicHierarchy, describeEpicGroupHeading } from "./jiraHierarchy";
 
 export type JiraIssuesModalParameters = {
   jiraProjectKey: string;
-  pinnedProjectId: string;
+  pinnedProjectFolderPath: string;
+  jiraConnectionSettings: JiraConnectionSettings;
   issues: JiraIssueSummary[];
-  onOpenIssueInBrowser: (issueBrowserUrl: string) => void;
-  onStartClaudeSessionFromJiraIssue: (
-    pinnedProjectId: string,
-    issueKey: string,
-  ) => void;
 };
 
 export class JiraIssuesModal extends Modal {
@@ -18,8 +17,11 @@ export class JiraIssuesModal extends Modal {
   private searchText = "";
   private issueListContainerElement: HTMLElement | null = null;
 
+  private readonly obsidianApplication: App;
+
   constructor(obsidianApplication: App, parameters: JiraIssuesModalParameters) {
     super(obsidianApplication);
+    this.obsidianApplication = obsidianApplication;
     this.parameters = parameters;
   }
 
@@ -90,7 +92,7 @@ export class JiraIssuesModal extends Modal {
           cls: "vault-dashboard-jira-issues-modal-epic",
         });
         epicItemElement.createEl("h4", {
-          text: describeEpicHeading(epicGroup.epicKey, epicGroup.epicSummaryText),
+          text: describeEpicGroupHeading(epicGroup.epicKey, epicGroup.epicSummaryText),
           cls: "vault-dashboard-jira-issues-modal-epic-heading",
         });
 
@@ -165,7 +167,7 @@ export class JiraIssuesModal extends Modal {
     });
     issueKeyButton.setAttribute("title", `Open ${issue.issueKey} in your browser`);
     issueKeyButton.addEventListener("click", () => {
-      this.parameters.onOpenIssueInBrowser(issue.issueBrowserUrl);
+      void shell.openExternal(issue.issueBrowserUrl);
     });
 
     rowElement.createSpan({
@@ -193,8 +195,10 @@ export class JiraIssuesModal extends Modal {
       `Open Claude Code in this folder with the full ${issue.issueKey} ticket`,
     );
     fixButton.addEventListener("click", () => {
-      this.parameters.onStartClaudeSessionFromJiraIssue(
-        this.parameters.pinnedProjectId,
+      void startClaudeSessionForJiraIssue(
+        this.obsidianApplication,
+        this.parameters.jiraConnectionSettings,
+        this.parameters.pinnedProjectFolderPath,
         issue.issueKey,
       );
       this.close();
@@ -214,10 +218,3 @@ function filterIssues(issues: JiraIssueSummary[], searchText: string): JiraIssue
   });
 }
 
-function describeEpicHeading(epicKey: string, summaryText: string | null): string {
-  if (epicKey === "no-epic") {
-    return "No epic";
-  }
-  const issueKey = epicKey.startsWith("epic:") ? epicKey.slice(5) : epicKey;
-  return summaryText === null || summaryText.length === 0 ? issueKey : `${issueKey} — ${summaryText}`;
-}

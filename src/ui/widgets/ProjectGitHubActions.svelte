@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { shell } from "electron";
   import { formatRelativeModifiedTime } from "../../data/format";
   import {
     describeRunOutcomeLabel,
     isRunFinished,
     sortWorkflowsByMostRecentRun,
     type DispatchableWorkflowSummary,
+    type GitHubActionsStore,
     type GitHubProjectActionsSnapshot,
     type WorkflowRunSummary,
   } from "../../data/githubActions";
@@ -12,15 +14,30 @@
 
   export let pinnedProjectId: string;
   export let gitHubActionsSnapshot: GitHubProjectActionsSnapshot | null = null;
-  export let onRefresh: () => void = () => {};
-  export let onDispatchWorkflow: (
-    pinnedProjectId: string,
-    workflowFilePath: string,
-    branchName: string,
-  ) => void = () => {};
-  export let onRerunFailedJobs: (pinnedProjectId: string, runDatabaseId: number) => void = () => {};
-  export let onCancelRun: (pinnedProjectId: string, runDatabaseId: number) => void = () => {};
-  export let onOpenRunInBrowser: (runBrowserUrl: string) => void = () => {};
+  export let gitHubActionsStore: GitHubActionsStore;
+
+  function refreshRuns(): void {
+    gitHubActionsStore.refreshNow();
+  }
+
+  function dispatchWorkflow(workflowFilePath: string, branchName: string): void {
+    void gitHubActionsStore.dispatchWorkflow(pinnedProjectId, workflowFilePath, branchName);
+  }
+
+  function rerunFailedJobsOfRun(runDatabaseId: number): void {
+    void gitHubActionsStore.rerunFailedJobsOfRun(pinnedProjectId, runDatabaseId);
+  }
+
+  function cancelRun(runDatabaseId: number): void {
+    void gitHubActionsStore.cancelRun(pinnedProjectId, runDatabaseId);
+  }
+
+  function openRunInBrowser(runBrowserUrl: string): void {
+    if (runBrowserUrl.length === 0) {
+      return;
+    }
+    void shell.openExternal(runBrowserUrl);
+  }
 
   // Null means "the user has not picked anything yet", which is what lets both fields keep
   // tracking the newest branch and last-used workflow as polling refreshes them. Once picked,
@@ -79,7 +96,7 @@
     if (!isDispatchable) {
       return;
     }
-    onDispatchWorkflow(pinnedProjectId, effectiveWorkflowFilePath, effectiveBranchName);
+    dispatchWorkflow(effectiveWorkflowFilePath, effectiveBranchName);
   }
 
   function describeRunGlyph(oneRun: WorkflowRunSummary): string {
@@ -121,23 +138,23 @@
   <div class="section-header">
     <h3 class="section-heading">GitHub Actions</h3>
     {#if gitHubActionsSnapshot !== null}
-      <button type="button" class="section-refresh-button" on:click={onRefresh}>refresh ↻</button>
+      <button type="button" class="section-refresh-button" on:click={refreshRuns}>refresh ↻</button>
     {/if}
   </div>
 
   {#if gitHubActionsSnapshot === null}
-    <p class="section-empty">This folder is not a GitHub repository.</p>
+    <p class="widget-empty">This folder is not a GitHub repository.</p>
   {:else if gitHubActionsSnapshot.availability === "checking"}
     <p class="row-shimmer" aria-hidden="true">·········································</p>
   {:else if gitHubActionsSnapshot.availability === "not-installed"}
-    <p class="section-empty">Install the GitHub CLI (<code>brew install gh</code>) to see workflow runs.</p>
+    <p class="widget-empty">Install the GitHub CLI (<code>brew install gh</code>) to see workflow runs.</p>
   {:else if gitHubActionsSnapshot.availability === "unauthenticated"}
-    <p class="section-empty">Run <code>gh auth login</code> in a terminal to see workflow runs.</p>
+    <p class="widget-empty">Run <code>gh auth login</code> in a terminal to see workflow runs.</p>
   {:else if gitHubActionsSnapshot.availability === "rate-limited"}
-    <p class="section-empty">GitHub rate limit reached. Runs reappear once it resets.</p>
+    <p class="widget-empty">GitHub rate limit reached. Runs reappear once it resets.</p>
   {:else if gitHubActionsSnapshot.availability === "errored"}
-    <p class="section-error">! Could not read workflow runs.</p>
-    <p class="section-error-hint" title={gitHubActionsSnapshot.lastErrorMessage ?? ""}>
+    <p class="widget-error">! Could not read workflow runs.</p>
+    <p class="widget-error-hint" title={gitHubActionsSnapshot.lastErrorMessage ?? ""}>
       {gitHubActionsSnapshot.lastErrorMessage ?? "Reload the plugin if this persists."}
     </p>
   {:else}
@@ -180,14 +197,24 @@
     {/if}
 
     {#if gitHubActionsSnapshot.lastErrorMessage !== null}
-      <p class="section-error" title={gitHubActionsSnapshot.lastErrorMessage}>
+      <p class="widget-error" title={gitHubActionsSnapshot.lastErrorMessage}>
         ! {gitHubActionsSnapshot.lastErrorMessage}
       </p>
     {/if}
 
     {#if gitHubActionsSnapshot.recentRuns.length === 0}
-      <p class="section-empty">No workflow runs yet.</p>
+      <p class="widget-empty">No workflow runs yet.</p>
     {:else}
+      <!-- The rows carry their own titles and button labels, so this header is a visual legend
+           only; announcing it again would repeat what each row already says. -->
+      <div class="run-column-header" aria-hidden="true">
+        <span class="run-column-label"></span>
+        <span class="run-column-label">workflow</span>
+        <span class="run-column-label">branch</span>
+        <span class="run-column-label">outcome</span>
+        <span class="run-column-label">when</span>
+        <span class="run-column-label"></span>
+      </div>
       <ul class="run-list">
         {#each gitHubActionsSnapshot.recentRuns as oneRun (oneRun.runDatabaseId)}
           <li class="run-row" data-outcome={describeRunOutcomeCategory(oneRun)}>
@@ -203,7 +230,7 @@
                   class="run-action-button"
                   title="Re-run the failed jobs of this run"
                   disabled={isActionInFlightForRun(oneRun)}
-                  on:click={() => onRerunFailedJobs(pinnedProjectId, oneRun.runDatabaseId)}
+                  on:click={() => rerunFailedJobsOfRun(oneRun.runDatabaseId)}
                 >{isActionInFlightForRun(oneRun) ? "rerun…" : "rerun ↻"}</button>
               {/if}
               {#if !isRunFinished(oneRun)}
@@ -212,14 +239,14 @@
                   class="run-action-button"
                   title="Cancel this run"
                   disabled={isActionInFlightForRun(oneRun)}
-                  on:click={() => onCancelRun(pinnedProjectId, oneRun.runDatabaseId)}
+                  on:click={() => cancelRun(oneRun.runDatabaseId)}
                 >{isActionInFlightForRun(oneRun) ? "cancel…" : "cancel ✕"}</button>
               {/if}
               <button
                 type="button"
                 class="run-action-button"
                 title="Open this run on github.com"
-                on:click={() => onOpenRunInBrowser(oneRun.runBrowserUrl)}
+                on:click={() => openRunInBrowser(oneRun.runBrowserUrl)}
               >↗</button>
             </span>
           </li>
@@ -299,7 +326,7 @@
     padding: 0;
   }
 
-  /* Reads as one command line — branch, then workflow, then the trigger — rather than three
+  /* Reads as one command line (branch, then workflow, then the trigger) rather than three
      unrelated controls floating in the section. */
   .dispatch-row {
     display: flex;
@@ -359,6 +386,28 @@
     cursor: default;
   }
 
+  /* Mirrors the run row track for track so the glyph column is labelled rather than memorised.
+     Its own tracks must stay in step with `.run-row` below. */
+  .run-column-header {
+    display: grid;
+    grid-template-columns: 1ch minmax(0, 1fr) 18ch 10ch 5ch 12ch;
+    align-items: baseline;
+    gap: var(--vault-dashboard-space-inline);
+    padding: 0 var(--vault-dashboard-space-row) var(--vault-dashboard-space-row);
+    border-bottom: var(--vault-dashboard-border-width) solid
+      var(--vault-dashboard-border-color-default);
+    box-sizing: border-box;
+  }
+
+  .run-column-label {
+    color: var(--vault-dashboard-text-faint);
+    font-size: var(--vault-dashboard-font-size-label);
+    text-transform: uppercase;
+    letter-spacing: var(--vault-dashboard-letter-spacing-uppercase);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
   .run-row {
     display: grid;
     /* Every track except the name is a fixed size on purpose: each row is its own grid, so an
@@ -401,7 +450,6 @@
     color: var(--vault-dashboard-text-faint);
   }
 
-  /* An unfinished run is the one thing worth looking at, so it is the only row at full strength. */
   .run-workflow-name {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -409,6 +457,7 @@
     color: var(--vault-dashboard-text-secondary);
   }
 
+  /* An unfinished run is the one thing worth looking at, so it is the only row at full strength. */
   .run-row[data-outcome="active"] .run-workflow-name {
     color: var(--vault-dashboard-text-primary);
     font-weight: var(--vault-dashboard-font-weight-bold);
@@ -426,7 +475,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    padding: 0 6px;
+    padding: 0 var(--vault-dashboard-space-row);
     border: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-default);
     color: var(--vault-dashboard-text-faint);
     font-size: var(--vault-dashboard-font-size-label);
@@ -500,33 +549,18 @@
     }
   }
 
-  .section-empty {
-    margin: 0;
-    color: var(--vault-dashboard-text-secondary);
-  }
-
-  /* `gh` stderr is unbounded — a DNS failure returns three sentences and two URLs. Clamping keeps
+  /* `gh` stderr is unbounded. A DNS failure returns three sentences and two URLs. Clamping keeps
      one bad poll from pushing the run list off screen; the full text stays in the title attribute
-     and can still be selected and copied. */
-  .section-error,
-  .section-error-hint {
+     and can still be selected and copied. The colours and margins come from the shared widget
+     state styling in styles.css. */
+  .widget-error,
+  .widget-error-hint {
     display: -webkit-box;
     -webkit-line-clamp: 3;
     line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
     overflow-wrap: anywhere;
-  }
-
-  .section-error {
-    margin: 0;
-    color: var(--vault-dashboard-color-status-stopped);
-  }
-
-  .section-error-hint {
-    margin: var(--vault-dashboard-space-row) 0 0 0;
-    color: var(--vault-dashboard-text-secondary);
-    font-size: var(--vault-dashboard-font-size-label);
   }
 
   .section-note {

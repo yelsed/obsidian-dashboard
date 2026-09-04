@@ -16,6 +16,13 @@ export type RolloverResult = {
 
 const DAILY_NOTE_BASENAME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const MAXIMUM_DAYS_TO_SCAN_FOR_WORKING_DAY = 7;
+const LIST_ITEM_LINE_PATTERN = /^[\s>]*[-*+]\s/;
+const DEFAULT_SPACES_PER_TAB_STOP = 4;
+
+type VaultIndentationStyle = {
+  indentationUnit: string;
+  spacesPerTabStop: number;
+};
 
 export async function rollOverOpenTasksIntoCurrentDailyNote(
   obsidianApplication: App,
@@ -44,7 +51,14 @@ export async function rollOverOpenTasksIntoCurrentDailyNote(
   const destinationFile = resolveExistingFile(obsidianApplication, destinationPath);
   const destinationContents =
     destinationFile === null ? "" : await obsidianApplication.vault.read(destinationFile);
-  const alreadyPresentTaskContents = new Set<string>(extractOpenTaskContents(destinationContents));
+  // Tasks that already sit in the destination note are skipped, but they can never become the
+  // parent of an appended task either: the appended block lands at the end of the note, too far
+  // from those lines for indentation to read as belonging to them.
+  const taskContentsAlreadyInDestinationNote = new Set<string>(
+    extractOpenTaskContents(destinationContents),
+  );
+  const appendedTaskContents = new Set<string>();
+  const vaultIndentationStyle = resolveVaultIndentationStyle(obsidianApplication);
 
   const taskLinesToAppend: string[] = [];
 
@@ -52,9 +66,22 @@ export async function rollOverOpenTasksIntoCurrentDailyNote(
     const sourceContents = await obsidianApplication.vault.read(sourceDailyNote);
     const sourceLines = sourceContents.split("\n");
     let sourceWasModified = false;
+    const migratedAncestorIndentationWidths: number[] = [];
 
     for (let lineIndex = 0; lineIndex < sourceLines.length; lineIndex++) {
-      const matchedOpenTask = sourceLines[lineIndex].match(OPEN_TASK_LINE_PATTERN);
+      const sourceLine = sourceLines[lineIndex];
+      const matchedOpenTask = sourceLine.match(OPEN_TASK_LINE_PATTERN);
+      // Every list item closes the subtrees at or below its own depth, whether or not it migrates.
+      // A completed parent therefore stops adopting its unfinished children on the new day.
+      if (matchedOpenTask === null && !LIST_ITEM_LINE_PATTERN.test(sourceLine)) {
+        continue;
+      }
+      const indentationWidth = measureIndentationWidth(
+        sourceLine,
+        vaultIndentationStyle.spacesPerTabStop,
+      );
+      dropAncestorsAtOrDeeperThan(migratedAncestorIndentationWidths, indentationWidth);
+
       if (matchedOpenTask === null) {
         continue;
       }
@@ -63,11 +90,23 @@ export async function rollOverOpenTasksIntoCurrentDailyNote(
         continue;
       }
 
-      if (!alreadyPresentTaskContents.has(taskContent)) {
-        alreadyPresentTaskContents.add(taskContent);
-        taskLinesToAppend.push(`- [ ] ${taskContent}`);
+      if (taskContentsAlreadyInDestinationNote.has(taskContent)) {
+        sourceLines[lineIndex] = markTaskLineAsMigrated(sourceLine);
+        sourceWasModified = true;
+        continue;
       }
-      sourceLines[lineIndex] = markTaskLineAsMigrated(sourceLines[lineIndex]);
+
+      if (!appendedTaskContents.has(taskContent)) {
+        appendedTaskContents.add(taskContent);
+        const migratedIndentation = vaultIndentationStyle.indentationUnit.repeat(
+          migratedAncestorIndentationWidths.length,
+        );
+        taskLinesToAppend.push(`${migratedIndentation}- [ ] ${taskContent}`);
+      }
+      // A task that reached the appended block, whether on this line or from an earlier daily
+      // note, can still adopt the subtasks that follow it here.
+      migratedAncestorIndentationWidths.push(indentationWidth);
+      sourceLines[lineIndex] = markTaskLineAsMigrated(sourceLine);
       sourceWasModified = true;
     }
 
@@ -97,6 +136,68 @@ export async function rollOverOpenTasksIntoCurrentDailyNote(
     migratedTaskCount: taskLinesToAppend.length,
     destinationDailyNoteBasename,
     destinationIsToday,
+  };
+}
+
+// A subtask is only worth carrying over when it stays underneath the task it belongs to, so the
+// destination indentation is rebuilt from how deep the task sits among the tasks that actually
+// migrated with it. Ancestors that stayed behind (already completed, or already present in the
+// destination note) collapse away instead of leaving the subtask stranded under an unrelated task.
+function dropAncestorsAtOrDeeperThan(
+  migratedAncestorIndentationWidths: number[],
+  indentationWidth: number,
+): void {
+  while (
+    migratedAncestorIndentationWidths.length > 0 &&
+    migratedAncestorIndentationWidths[migratedAncestorIndentationWidths.length - 1] >=
+      indentationWidth
+  ) {
+    migratedAncestorIndentationWidths.pop();
+  }
+}
+
+function measureIndentationWidth(taskLine: string, spacesPerTabStop: number): number {
+  let indentationWidth = 0;
+  for (const character of taskLine) {
+    if (character === " ") {
+      indentationWidth += 1;
+      continue;
+    }
+    if (character === "\t") {
+      indentationWidth += spacesPerTabStop;
+      continue;
+    }
+    // A blockquote marker carries no nesting of its own, so a quoted task tree keeps the depths
+    // its own indentation describes.
+    if (character === ">") {
+      continue;
+    }
+    return indentationWidth;
+  }
+  return indentationWidth;
+}
+
+// Obsidian lets each vault choose tabs or spaces for list indentation, and the rolled-over tasks
+// have to match or they render at the wrong depth in the destination note.
+function resolveVaultIndentationStyle(obsidianApplication: App): VaultIndentationStyle {
+  const vaultWithEditorConfiguration = obsidianApplication.vault as unknown as {
+    getConfig?: (configurationKey: string) => unknown;
+  };
+  const readEditorConfiguration = vaultWithEditorConfiguration.getConfig?.bind(
+    vaultWithEditorConfiguration,
+  );
+
+  const configuredTabSize = readEditorConfiguration?.("tabSize");
+  const spacesPerTabStop =
+    typeof configuredTabSize === "number" && configuredTabSize > 0
+      ? configuredTabSize
+      : DEFAULT_SPACES_PER_TAB_STOP;
+
+  const vaultIndentsWithTabs = readEditorConfiguration?.("useTab") !== false;
+
+  return {
+    indentationUnit: vaultIndentsWithTabs ? "\t" : " ".repeat(spacesPerTabStop),
+    spacesPerTabStop,
   };
 }
 

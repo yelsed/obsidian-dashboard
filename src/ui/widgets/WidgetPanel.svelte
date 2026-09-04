@@ -2,7 +2,7 @@
   export let title: string;
   export let isCollapsed: boolean = false;
   export let onToggleCollapsed: () => void = () => {};
-  /* A one-glance reading of what the panel holds — "5 / 312", "3 open", "2 failing". Seven
+  /* A one-glance reading of what the panel holds: "5 / 312", "3 open", "2 failing". Seven
      identically-titled panels give the eye nothing to land on; a number in the header lets the
      dashboard be read without reading any panel's contents. */
   export let summary: string = "";

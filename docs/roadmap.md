@@ -66,7 +66,7 @@ GitHub Actions ships as **part of pinned projects**, not as a widget of its own.
 - The **project detail page** gets a `GitHub Actions` section: recent runs, a branch → workflow → run dispatch row, re-run failed jobs, cancel an in-progress run, and open a run on github.com.
 - A finished run raises an Obsidian notice plus a desktop notification.
 
-Projects whose folder is not a GitHub repository show nothing at all — no glyph on the row, and the detail section says so in one line.
+Projects whose folder is not a GitHub repository show nothing at all: no glyph on the row, and the detail section says so in one line.
 
 Deliberately left out, in rough priority order should they earn the build time:
 
@@ -109,7 +109,7 @@ Explicitly will not be built unless the constraints change.
 
 - **Mobile support.** The plugin is desktop-only because we rely on Node APIs (`child_process`) for Docker detection and Procrast CLI shell-outs. Obsidian Mobile has no Node runtime.
 - **Time-travel slider.** Replaying the state of the vault on a previous day was an early creative idea but is too invasive to scope reliably.
-- **Two-way command-center buttons** that run arbitrary shell scripts directly from the dashboard. Anything that runs a shell command should go through the Claude Code terminal so the user sees the output. This bans *arbitrary* shell only — fixed subcommands of a known tool with validated arguments, like the GitHub Actions widget's `gh workflow run` / `gh run rerun` / `gh run cancel`, are allowed, because there is no command line for the user to compose and the output that matters lives on github.com.
+- **Two-way command-center buttons** that run arbitrary shell scripts directly from the dashboard. Anything that runs a shell command should go through the Claude Code terminal so the user sees the output. This bans *arbitrary* shell only. Fixed subcommands of a known tool with validated arguments, like the GitHub Actions widget's `gh workflow run` / `gh run rerun` / `gh run cancel`, are allowed, because there is no command line for the user to compose and the output that matters lives on github.com.
 - **Publishing to the Obsidian community plugin registry.** This is a personal tool; the maintenance and review overhead of public distribution is not worth it right now.
 
 ---

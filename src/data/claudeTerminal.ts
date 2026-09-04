@@ -113,3 +113,60 @@ function findClaudeCodePluginInstance(obsidianApplication: App): object | null {
   }
   return null;
 }
+
+// Both the Claude sessions widget and the pinned project detail page offer these two actions on a
+// session row, so the behaviour lives here rather than in either component.
+export function copyClaudeResumeCommandToClipboard(
+  pinnedProjectFolderPath: string,
+  sessionId: string,
+): void {
+  const resumeCommandLine = buildClaudeResumeCommandLine(pinnedProjectFolderPath, sessionId);
+  void copyTextToClipboardWithFallback(resumeCommandLine).then((wasCopied) => {
+    new Notice(wasCopied ? "Resume command copied to clipboard" : "Could not copy resume command");
+  });
+}
+
+export function relaunchClaudeSessionInTerminal(
+  obsidianApplication: App,
+  pinnedProjectFolderPath: string,
+  sessionId: string,
+): void {
+  void launchInObsidianClaudeTerminal(obsidianApplication, {
+    workingDirectoryAbsolutePath: pinnedProjectFolderPath,
+    resumeSessionId: sessionId,
+    fallbackShellCommandLine: buildClaudeResumeCommandLine(pinnedProjectFolderPath, sessionId),
+  });
+}
+
+export function startClaudeSessionWithPrompt(
+  obsidianApplication: App,
+  pinnedProjectFolderPath: string,
+  initialPromptText: string,
+): void {
+  void launchInObsidianClaudeTerminal(obsidianApplication, {
+    workingDirectoryAbsolutePath: pinnedProjectFolderPath,
+    initialPromptText,
+    fallbackShellCommandLine: buildClaudeStartFromGoalsCommandLine(
+      pinnedProjectFolderPath,
+      initialPromptText,
+    ),
+  });
+}
+
+export function buildClaudeResumeCommandLine(
+  pinnedProjectFolderPath: string,
+  sessionId: string,
+): string {
+  return `cd ${quoteShellArgument(pinnedProjectFolderPath)} && claude --resume ${quoteShellArgument(sessionId)}`;
+}
+
+export function buildClaudeStartFromGoalsCommandLine(
+  pinnedProjectFolderPath: string,
+  initialPromptText: string,
+): string {
+  return `cd ${quoteShellArgument(pinnedProjectFolderPath)} && claude ${quoteShellArgument(initialPromptText)}`;
+}
+
+function quoteShellArgument(argumentValue: string): string {
+  return `'${argumentValue.replace(/'/g, "'\\''")}'`;
+}

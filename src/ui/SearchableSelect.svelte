@@ -25,8 +25,6 @@
   $: listboxElementId = `${instanceId}-listbox`;
   $: highlightedOptionElementId = `${instanceId}-option-${highlightedOptionIndex}`;
 
-  // Cleared on every open so the full list is shown, which is the whole point of putting the
-  // search inside the panel rather than in the closed control.
   $: normalisedSearchText = searchText.trim().toLowerCase();
   $: visibleOptions =
     normalisedSearchText.length === 0
@@ -39,6 +37,8 @@
     if (isDisabled) {
       return;
     }
+    // Cleared on every open so the full list is shown, which is the whole point of putting the
+    // search inside the panel rather than in the closed control.
     searchText = "";
     highlightedOptionIndex = Math.max(
       0,
@@ -75,7 +75,7 @@
 
   /* Hover highlighting listens for mousemove rather than mouseenter on purpose. Scrolling the
      keyboard highlight into view slides a different option under a stationary pointer, and the
-     browser fires mouseenter for it — which would drag the highlight back and make the arrow keys
+     browser fires mouseenter for it, which would drag the highlight back and make the arrow keys
      look like they were dropping presses. mousemove only fires when the pointer really moves. */
   function moveHighlightBy(offset: number): void {
     if (visibleOptions.length === 0) {
@@ -139,8 +139,8 @@
     queueMicrotask(scrollHighlightedOptionIntoView);
   }
 
-  // Closing on any click outside this component — rather than stopping propagation from inside
-  // it — is what lets opening a second picker close the first one.
+  // Closing on any click outside this component (rather than stopping propagation from inside
+  // it) is what lets opening a second picker close the first one.
   function closeWhenClickLandsOutside(clickEvent: MouseEvent): void {
     if (!isPanelOpen || rootElement === null) {
       return;
@@ -292,7 +292,7 @@
     background: var(--vault-dashboard-surface-panel);
     border: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-accent);
     padding: var(--vault-dashboard-space-row);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    box-shadow: var(--vault-dashboard-shadow-overlay);
   }
 
   .searchable-select-search {

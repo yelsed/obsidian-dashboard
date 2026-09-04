@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { get, type Writable } from "svelte/store";
-  import { FileSystemAdapter, Notice, TFile, type App as ObsidianApplication } from "obsidian";
+  import { Notice, TFile, type App as ObsidianApplication } from "obsidian";
 
   import TabBar from "./TabBar.svelte";
   import WidgetSubTabBar from "./WidgetSubTabBar.svelte";
@@ -15,9 +15,7 @@
   import ProcrastIdeas from "./widgets/ProcrastIdeas.svelte";
   import JiraIssues from "./widgets/JiraIssues.svelte";
 
-  import { execFile } from "child_process";
   import { shell } from "electron";
-  import { promises as filesystemPromises } from "fs";
   import nodePath from "path";
 
   import { createRecentlyModifiedFilesStore } from "../data/recents";
@@ -27,15 +25,8 @@
   import { createTagFolderStatsStore } from "../data/tags";
   import { createGraphInsightsStore } from "../data/graph";
   import { createDockerContainersStore } from "../data/docker";
-  import {
-    createPinnedProjectsStore,
-    collectAllOpenTasksForProjectFolder,
-    type ProjectOpenTaskForWidget,
-  } from "../data/pinnedProjects";
-  import {
-    createProjectShellCommandsStore,
-    buildShellCommandRunKey,
-  } from "../data/projectShellCommands";
+  import { createPinnedProjectsStore } from "../data/pinnedProjects";
+  import { createProjectShellCommandsStore } from "../data/projectShellCommands";
   import {
     buildSearchQueryForTag,
     buildSearchQueryForFolder,
@@ -43,18 +34,13 @@
     openGlobalSearchWithQuery,
   } from "../data/search";
   import { copyTextToClipboardWithFallback } from "../data/clipboard";
-  import { launchInObsidianClaudeTerminal } from "../data/claudeTerminal";
   import { createProcrastIdeasStore, type ProcrastIdea } from "../data/procrast";
-  import {
-    createJiraIssuesStore,
-    fetchJiraIssueDetail,
-    buildClaudePromptForJiraIssue,
-  } from "../data/jira";
+  import { createJiraIssuesStore } from "../data/jira";
   import {
     createGitHubActionsStore,
     type TrackedGitHubProject,
   } from "../data/githubActions";
-  import { announceToUser } from "../data/desktopNotification";
+  import { showNoticeAndDesktopNotification } from "../data/desktopNotification";
   import { openPlanProcrastIdeaFlow } from "./PlanProcrastIdeaModal";
   import { confirmMarkProcrastIdeaDone } from "./ConfirmProcrastIdeaDoneModal";
   import { ProcrastIdeaDetailsModal } from "./ProcrastIdeaDetailsModal";
@@ -81,6 +67,22 @@
 
   const initialSettingsSnapshot = get(settingsStore);
   const initialActiveTab = resolveActiveTab(initialSettingsSnapshot);
+
+  // Several stores need to be told about a settings change exactly once. A reactive statement runs
+  // again whenever anything it reads changes, so each of those hand-offs is guarded by the key it
+  // last acted on.
+  function createChangeApplier(
+    initialKey: string,
+  ): (currentKey: string, applyChange: () => void) => void {
+    let lastAppliedKey = initialKey;
+    return (currentKey, applyChange) => {
+      if (currentKey === lastAppliedKey) {
+        return;
+      }
+      lastAppliedKey = currentKey;
+      applyChange();
+    };
+  }
 
   const recentlyModifiedFilesStore = createRecentlyModifiedFilesStore(
     obsidianApp,
@@ -165,7 +167,7 @@
         return;
       }
       const { finishedRun, projectDisplayName } = runCompletionEvent;
-      announceToUser(
+      showNoticeAndDesktopNotification(
         `${finishedRun.workflowName} ${finishedRun.runConclusion ?? "completed"}`,
         `on ${finishedRun.headBranchName} · ${projectDisplayName}`,
       );
@@ -275,11 +277,10 @@
     )
     .join("\n");
 
-  let lastAppliedPinnedProjectsConfigKey: string = activePinnedProjectsConfigKey;
-  $: if (activePinnedProjectsConfigKey !== lastAppliedPinnedProjectsConfigKey) {
-    lastAppliedPinnedProjectsConfigKey = activePinnedProjectsConfigKey;
-    pinnedProjectsStore.setPinnedProjectsConfig(activePinnedProjectsConfig);
-  }
+  const applyPinnedProjectsConfigWhenChanged = createChangeApplier(activePinnedProjectsConfigKey);
+  $: applyPinnedProjectsConfigWhenChanged(activePinnedProjectsConfigKey, () =>
+    pinnedProjectsStore.setPinnedProjectsConfig(activePinnedProjectsConfig),
+  );
 
   $: jiraConnectionSettings = currentSettings.jiraConnection;
   $: jiraConnectionSettingsKey = [
@@ -289,20 +290,18 @@
     String(jiraConnectionSettings.showOnlyIssuesAssignedToCurrentUser),
   ].join("::");
 
-  let lastAppliedJiraConnectionSettingsKey: string = jiraConnectionSettingsKey;
-  $: if (jiraConnectionSettingsKey !== lastAppliedJiraConnectionSettingsKey) {
-    lastAppliedJiraConnectionSettingsKey = jiraConnectionSettingsKey;
-    jiraIssuesStore.setConnectionSettings(jiraConnectionSettings);
-  }
+  const applyJiraConnectionSettingsWhenChanged = createChangeApplier(jiraConnectionSettingsKey);
+  $: applyJiraConnectionSettingsWhenChanged(jiraConnectionSettingsKey, () =>
+    jiraIssuesStore.setConnectionSettings(jiraConnectionSettings),
+  );
 
   $: activeJiraProjectKeys = collectJiraProjectKeysFromPinnedProjects(activePinnedProjectsConfig);
   $: activeJiraProjectKeysKey = activeJiraProjectKeys.join(",");
 
-  let lastAppliedJiraProjectKeysKey: string = activeJiraProjectKeysKey;
-  $: if (activeJiraProjectKeysKey !== lastAppliedJiraProjectKeysKey) {
-    lastAppliedJiraProjectKeysKey = activeJiraProjectKeysKey;
-    jiraIssuesStore.setProjectKeysToQuery(activeJiraProjectKeys);
-  }
+  const applyJiraProjectKeysWhenChanged = createChangeApplier(activeJiraProjectKeysKey);
+  $: applyJiraProjectKeysWhenChanged(activeJiraProjectKeysKey, () =>
+    jiraIssuesStore.setProjectKeysToQuery(activeJiraProjectKeys),
+  );
 
   $: trackedGitHubProjects = buildTrackedGitHubProjectsFromPinnedProjects(activePinnedProjectsConfig);
   $: trackedGitHubProjectsKey = trackedGitHubProjects
@@ -311,17 +310,17 @@
     )
     .join("\n");
 
-  let lastAppliedTrackedGitHubProjectsKey: string = trackedGitHubProjectsKey;
-  $: if (trackedGitHubProjectsKey !== lastAppliedTrackedGitHubProjectsKey) {
-    lastAppliedTrackedGitHubProjectsKey = trackedGitHubProjectsKey;
-    gitHubActionsStore.setTrackedProjects(trackedGitHubProjects);
-  }
+  const applyTrackedGitHubProjectsWhenChanged = createChangeApplier(trackedGitHubProjectsKey);
+  $: applyTrackedGitHubProjectsWhenChanged(trackedGitHubProjectsKey, () =>
+    gitHubActionsStore.setTrackedProjects(trackedGitHubProjects),
+  );
 
-  let lastAppliedProcrastIdeaFolderMappingsKey: string = activeProcrastIdeaFolderMappingsKey;
-  $: if (activeProcrastIdeaFolderMappingsKey !== lastAppliedProcrastIdeaFolderMappingsKey) {
-    lastAppliedProcrastIdeaFolderMappingsKey = activeProcrastIdeaFolderMappingsKey;
-    pinnedProjectsStore.setProcrastIdeaFolderMappings(activeProcrastIdeaFolderMappings);
-  }
+  const applyProcrastIdeaFolderMappingsWhenChanged = createChangeApplier(
+    activeProcrastIdeaFolderMappingsKey,
+  );
+  $: applyProcrastIdeaFolderMappingsWhenChanged(activeProcrastIdeaFolderMappingsKey, () =>
+    pinnedProjectsStore.setProcrastIdeaFolderMappings(activeProcrastIdeaFolderMappings),
+  );
 
   $: selectedPinnedProjectForDetail =
     selectedPinnedProjectIdForDetail === null
@@ -463,41 +462,10 @@
       }));
   }
 
-  function handleRefreshGitHubActions(): void {
-    gitHubActionsStore.refreshNow();
-  }
-
-  function handleDispatchGitHubWorkflow(
-    pinnedProjectId: string,
-    workflowFilePath: string,
-    branchName: string,
-  ): void {
-    void gitHubActionsStore.dispatchWorkflow(pinnedProjectId, workflowFilePath, branchName);
-  }
-
-  function handleRerunFailedGitHubJobs(pinnedProjectId: string, runDatabaseId: number): void {
-    void gitHubActionsStore.rerunFailedJobsOfRun(pinnedProjectId, runDatabaseId);
-  }
-
-  function handleCancelGitHubRun(pinnedProjectId: string, runDatabaseId: number): void {
-    void gitHubActionsStore.cancelRun(pinnedProjectId, runDatabaseId);
-  }
-
-  function handleOpenGitHubRunInBrowser(runBrowserUrl: string): void {
-    if (runBrowserUrl.length === 0) {
-      return;
-    }
-    void shell.openExternal(runBrowserUrl);
-  }
-
   function resolvePinnedProjectForWidgetById(pinnedProjectId: string) {
     return (
       get(pinnedProjectsForWidgetData).find((project) => project.id === pinnedProjectId) ?? null
     );
-  }
-
-  function resolvePinnedProjectFolderPathById(pinnedProjectId: string): string | null {
-    return resolvePinnedProjectForWidgetById(pinnedProjectId)?.folderPath ?? null;
   }
 
   function handleShowAllJiraIssuesForProject(
@@ -510,36 +478,10 @@
     }
     new JiraIssuesModal(obsidianApp, {
       jiraProjectKey,
-      pinnedProjectId,
+      pinnedProjectFolderPath: projectForWidget.folderPath,
+      jiraConnectionSettings,
       issues: projectForWidget.jiraIssuesForProject,
-      onOpenIssueInBrowser: handleOpenJiraIssueInBrowser,
-      onStartClaudeSessionFromJiraIssue: handleStartClaudeSessionFromJiraIssue,
     }).open();
-  }
-
-  async function handleStartClaudeSessionFromJiraIssue(
-    pinnedProjectId: string,
-    issueKey: string,
-  ): Promise<void> {
-    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
-    if (pinnedProjectFolderPath === null) {
-      return;
-    }
-    new Notice(`Fetching ${issueKey} from Jira…`);
-    const detailResult = await fetchJiraIssueDetail(currentSettings.jiraConnection, issueKey);
-    if (!detailResult.ok) {
-      new Notice(`Could not load ${issueKey}: ${detailResult.message}`);
-      return;
-    }
-    const initialPromptText = buildClaudePromptForJiraIssue(detailResult.issue);
-    void launchInObsidianClaudeTerminal(obsidianApp, {
-      workingDirectoryAbsolutePath: pinnedProjectFolderPath,
-      initialPromptText,
-      fallbackShellCommandLine: buildClaudeStartFromGoalsCommandLine(
-        pinnedProjectFolderPath,
-        initialPromptText,
-      ),
-    });
   }
 
   function collectJiraProjectKeysFromPinnedProjects(
@@ -808,470 +750,6 @@
     selectedPinnedProjectIdForDetail = null;
   }
 
-  function handleOpenPinnedProjectChildFile(
-    pinnedProjectId: string,
-    relativeChildFilePath: string,
-  ): void {
-    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
-    if (pinnedProjectFolderPath === null) {
-      return;
-    }
-    const absoluteChildFilePath = nodePath.resolve(
-      pinnedProjectFolderPath,
-      relativeChildFilePath,
-    );
-    openAbsoluteMarkdownFilePath(absoluteChildFilePath);
-  }
-
-  function handleOpenPinnedProjectChildFolder(
-    pinnedProjectId: string,
-    relativeChildFolderPath: string,
-  ): void {
-    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
-    if (pinnedProjectFolderPath === null) {
-      return;
-    }
-    const absoluteChildFolderPath = nodePath.resolve(
-      pinnedProjectFolderPath,
-      relativeChildFolderPath,
-    );
-    void shell.openPath(absoluteChildFolderPath);
-  }
-
-  function openAbsoluteMarkdownFilePath(absoluteMarkdownFilePath: string): void {
-    if (openMarkdownFileInsideObsidianIfWithinVault(absoluteMarkdownFilePath)) {
-      return;
-    }
-    openMarkdownFileInCodeEditor(absoluteMarkdownFilePath);
-  }
-
-  function openMarkdownFileInCodeEditor(absoluteMarkdownFilePath: string): void {
-    execFile("/usr/bin/open", ["-a", "Zed", absoluteMarkdownFilePath], (error) => {
-      if (error) {
-        new Notice("Could not open GOALS.md in Zed — opening with the default app");
-        void shell.openPath(absoluteMarkdownFilePath);
-      }
-    });
-  }
-
-  function openMarkdownFileInsideObsidianIfWithinVault(
-    absoluteFilePath: string,
-  ): boolean {
-    if (!absoluteFilePath.toLowerCase().endsWith(".md")) {
-      return false;
-    }
-    const vaultRelativeFilePath =
-      resolveVaultRelativeFilePathIfWithinVault(absoluteFilePath);
-    if (vaultRelativeFilePath === null) {
-      return false;
-    }
-    const matchedAbstractFile = obsidianApp.vault.getAbstractFileByPath(vaultRelativeFilePath);
-    if (!(matchedAbstractFile instanceof TFile)) {
-      return false;
-    }
-    void obsidianApp.workspace.getLeaf(false).openFile(matchedAbstractFile);
-    return true;
-  }
-
-  function resolveVaultRelativeFilePathIfWithinVault(
-    absoluteFilePath: string,
-  ): string | null {
-    const vaultBasePath = resolveCurrentVaultBasePath();
-    if (vaultBasePath === null) {
-      return null;
-    }
-    if (!isAbsolutePathInsideVault(absoluteFilePath, vaultBasePath)) {
-      return null;
-    }
-    return nodePath
-      .relative(vaultBasePath, absoluteFilePath)
-      .split(nodePath.sep)
-      .join("/");
-  }
-
-  function resolveCurrentVaultBasePath(): string | null {
-    const vaultAdapter = obsidianApp.vault.adapter;
-    if (vaultAdapter instanceof FileSystemAdapter) {
-      return vaultAdapter.getBasePath();
-    }
-    return null;
-  }
-
-  function isAbsolutePathInsideVault(
-    absoluteFilePath: string,
-    vaultBasePath: string,
-  ): boolean {
-    const lowercasedFilePath = absoluteFilePath.toLowerCase();
-    const lowercasedVaultBasePath = vaultBasePath.toLowerCase();
-    return (
-      lowercasedFilePath === lowercasedVaultBasePath ||
-      lowercasedFilePath.startsWith(`${lowercasedVaultBasePath}/`)
-    );
-  }
-
-  function handleRunPinnedProjectShellCommand(
-    pinnedProjectId: string,
-    shellCommandIndex: number,
-    commandLine: string,
-  ): void {
-    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
-    if (pinnedProjectFolderPath === null) {
-      return;
-    }
-    projectShellCommandsStore.startCommandRun({
-      runKey: buildShellCommandRunKey(pinnedProjectId, shellCommandIndex),
-      workingDirectoryAbsolutePath: pinnedProjectFolderPath,
-      commandLine,
-    });
-  }
-
-  function handleKillPinnedProjectShellCommand(
-    pinnedProjectId: string,
-    shellCommandIndex: number,
-  ): void {
-    projectShellCommandsStore.killCommandRun(
-      buildShellCommandRunKey(pinnedProjectId, shellCommandIndex),
-    );
-  }
-
-  function buildClaudeResumeCommandLine(
-    pinnedProjectFolderPath: string,
-    sessionId: string,
-  ): string {
-    return `cd ${quoteShellArgument(pinnedProjectFolderPath)} && claude --resume ${quoteShellArgument(sessionId)}`;
-  }
-
-  const PROJECT_GOALS_FILE_NAME = "GOALS.md";
-  const PROJECT_GOALS_FILE_TEMPLATE = "# Goals\n\n- \n";
-
-  function buildClaudeStartFromGoalsCommandLine(
-    pinnedProjectFolderPath: string,
-    initialPromptText: string,
-  ): string {
-    return `cd ${quoteShellArgument(pinnedProjectFolderPath)} && claude ${quoteShellArgument(initialPromptText)}`;
-  }
-
-  function quoteShellArgument(argumentValue: string): string {
-    return `'${argumentValue.replace(/'/g, "'\\''")}'`;
-  }
-
-  function resolveProjectGoalsFilePath(pinnedProjectFolderPath: string): string {
-    return nodePath.resolve(pinnedProjectFolderPath, PROJECT_GOALS_FILE_NAME);
-  }
-
-  function buildProjectGoalsPlanningPrompt(projectGoalsMarkdown: string): string {
-    return `Here are the goals from GOALS.md:\n\n---\n${projectGoalsMarkdown}\n---\n\nPlease make a plan to accomplish these goals.`;
-  }
-
-  async function handleCreateProjectGoalsFile(
-    pinnedProjectId: string,
-  ): Promise<void> {
-    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
-    if (pinnedProjectFolderPath === null) {
-      return;
-    }
-    const absoluteGoalsFilePath = resolveProjectGoalsFilePath(pinnedProjectFolderPath);
-    const vaultRelativeGoalsFilePath =
-      resolveVaultRelativeFilePathIfWithinVault(absoluteGoalsFilePath);
-
-    if (vaultRelativeGoalsFilePath !== null) {
-      const existingGoalsFile =
-        obsidianApp.vault.getAbstractFileByPath(vaultRelativeGoalsFilePath);
-      if (existingGoalsFile instanceof TFile) {
-        new Notice("GOALS.md already exists — opening it");
-        void obsidianApp.workspace.getLeaf(false).openFile(existingGoalsFile);
-        refreshAllDashboardData();
-        return;
-      }
-
-      try {
-        const createdGoalsFile = await obsidianApp.vault.create(
-          vaultRelativeGoalsFilePath,
-          PROJECT_GOALS_FILE_TEMPLATE,
-        );
-        new Notice("Created GOALS.md");
-        void obsidianApp.workspace.getLeaf(false).openFile(createdGoalsFile);
-        refreshAllDashboardData();
-        return;
-      } catch {
-        const existingAfterFailedCreate =
-          obsidianApp.vault.getAbstractFileByPath(vaultRelativeGoalsFilePath);
-        if (existingAfterFailedCreate instanceof TFile) {
-          new Notice("GOALS.md already exists — opening it");
-          void obsidianApp.workspace.getLeaf(false).openFile(existingAfterFailedCreate);
-          refreshAllDashboardData();
-          return;
-        }
-        new Notice("Could not create GOALS.md");
-        return;
-      }
-    }
-
-    try {
-      await filesystemPromises.writeFile(absoluteGoalsFilePath, PROJECT_GOALS_FILE_TEMPLATE, {
-        encoding: "utf8",
-        flag: "wx",
-      });
-      new Notice("Created GOALS.md");
-    } catch (error) {
-      if (isFileAlreadyExistsError(error)) {
-        new Notice("GOALS.md already exists — opening it");
-      } else {
-        new Notice("Could not create GOALS.md");
-        return;
-      }
-    }
-
-    openAbsoluteMarkdownFilePath(absoluteGoalsFilePath);
-    refreshAllDashboardData();
-  }
-
-  function isErrorWithCode(error: unknown, expectedCode: string): boolean {
-    return (
-      error !== null &&
-      typeof error === "object" &&
-      "code" in error &&
-      error.code === expectedCode
-    );
-  }
-
-  function isFileAlreadyExistsError(error: unknown): boolean {
-    return isErrorWithCode(error, "EEXIST");
-  }
-
-  function isFileNotFoundError(error: unknown): boolean {
-    return isErrorWithCode(error, "ENOENT");
-  }
-
-  function handleOpenProjectGoalsFile(pinnedProjectId: string): void {
-    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
-    if (pinnedProjectFolderPath === null) {
-      return;
-    }
-    openAbsoluteMarkdownFilePath(resolveProjectGoalsFilePath(pinnedProjectFolderPath));
-  }
-
-  async function readProjectGoalsPrompt(
-    pinnedProjectFolderPath: string,
-  ): Promise<string | null> {
-    try {
-      const projectGoalsMarkdown = await filesystemPromises.readFile(
-        resolveProjectGoalsFilePath(pinnedProjectFolderPath),
-        "utf8",
-      );
-      return buildProjectGoalsPlanningPrompt(projectGoalsMarkdown);
-    } catch (error) {
-      if (isFileNotFoundError(error)) {
-        new Notice("GOALS.md no longer exists — refreshing");
-        refreshAllDashboardData();
-      } else {
-        new Notice("Could not read GOALS.md");
-      }
-      return null;
-    }
-  }
-
-  function handleCopyClaudeResumeCommandToClipboard(
-    pinnedProjectId: string,
-    sessionId: string,
-  ): void {
-    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
-    if (pinnedProjectFolderPath === null) {
-      return;
-    }
-    const resumeCommandLine = buildClaudeResumeCommandLine(pinnedProjectFolderPath, sessionId);
-    void copyTextToClipboardWithFallback(resumeCommandLine).then((wasCopied) => {
-      new Notice(
-        wasCopied
-          ? "Resume command copied to clipboard"
-          : "Could not copy resume command",
-      );
-    });
-  }
-
-  function handleRelaunchClaudeSession(
-    pinnedProjectId: string,
-    sessionId: string,
-  ): void {
-    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
-    if (pinnedProjectFolderPath === null) {
-      return;
-    }
-    void launchInObsidianClaudeTerminal(obsidianApp, {
-      workingDirectoryAbsolutePath: pinnedProjectFolderPath,
-      resumeSessionId: sessionId,
-      fallbackShellCommandLine: buildClaudeResumeCommandLine(pinnedProjectFolderPath, sessionId),
-    });
-  }
-
-  async function handleStartClaudeSessionFromProjectGoals(
-    pinnedProjectId: string,
-  ): Promise<void> {
-    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
-    if (pinnedProjectFolderPath === null) {
-      return;
-    }
-    const initialPromptText = await readProjectGoalsPrompt(pinnedProjectFolderPath);
-    if (initialPromptText === null) {
-      return;
-    }
-    void launchInObsidianClaudeTerminal(obsidianApp, {
-      workingDirectoryAbsolutePath: pinnedProjectFolderPath,
-      initialPromptText,
-      fallbackShellCommandLine: buildClaudeStartFromGoalsCommandLine(
-        pinnedProjectFolderPath,
-        initialPromptText,
-      ),
-    });
-  }
-
-  const COLLECTED_OPEN_TASKS_HEADING_PATTERN = /^## Open tasks \(collected /m;
-
-  function buildCollectedOpenTasksSectionMarkdown(
-    collectedOpenTasks: ProjectOpenTaskForWidget[],
-    collectedOnIsoDate: string,
-  ): string {
-    const taskLines = collectedOpenTasks.map(
-      (openTask) => `- [ ] ${openTask.taskText}  (${openTask.relativeFilePath})`,
-    );
-    return `## Open tasks (collected ${collectedOnIsoDate})\n${taskLines.join("\n")}\n`;
-  }
-
-  // Re-collecting replaces the previous collected block rather than appending, so the
-  // section never accumulates stale duplicates across runs while any hand-written content
-  // above or below it survives untouched.
-  function mergeCollectedTasksSectionIntoGoalsMarkdown(
-    existingGoalsMarkdown: string,
-    collectedTasksSectionMarkdown: string,
-  ): string {
-    const headingMatch = existingGoalsMarkdown.match(COLLECTED_OPEN_TASKS_HEADING_PATTERN);
-    if (headingMatch === null || headingMatch.index === undefined) {
-      const trimmedExisting = existingGoalsMarkdown.replace(/\s*$/, "");
-      const leadingSeparator = trimmedExisting.length === 0 ? "" : "\n\n";
-      return `${trimmedExisting}${leadingSeparator}${collectedTasksSectionMarkdown}`;
-    }
-
-    const markdownBeforeSection = existingGoalsMarkdown.slice(0, headingMatch.index);
-    const markdownFromSectionStart = existingGoalsMarkdown.slice(headingMatch.index);
-    const markdownAfterCollectedHeadingPrefix = markdownFromSectionStart.slice(
-      headingMatch[0].length,
-    );
-    const nextHeadingMatch = markdownAfterCollectedHeadingPrefix.match(/^## /m);
-    const markdownAfterSection =
-      nextHeadingMatch === null || nextHeadingMatch.index === undefined
-        ? ""
-        : markdownAfterCollectedHeadingPrefix.slice(nextHeadingMatch.index);
-
-    const trimmedBefore = markdownBeforeSection.replace(/\s*$/, "");
-    const leadingSeparator = trimmedBefore.length === 0 ? "" : "\n\n";
-    const trailingBlock = markdownAfterSection.length === 0 ? "" : `\n${markdownAfterSection}`;
-    return `${trimmedBefore}${leadingSeparator}${collectedTasksSectionMarkdown}${trailingBlock}`;
-  }
-
-  async function readExistingProjectGoalsMarkdownOrTemplate(
-    absoluteGoalsFilePath: string,
-  ): Promise<string> {
-    try {
-      return await filesystemPromises.readFile(absoluteGoalsFilePath, "utf8");
-    } catch (error) {
-      if (isFileNotFoundError(error)) {
-        return PROJECT_GOALS_FILE_TEMPLATE;
-      }
-      throw error;
-    }
-  }
-
-  async function writeProjectGoalsMarkdown(
-    absoluteGoalsFilePath: string,
-    goalsMarkdown: string,
-  ): Promise<boolean> {
-    const vaultRelativeGoalsFilePath =
-      resolveVaultRelativeFilePathIfWithinVault(absoluteGoalsFilePath);
-
-    if (vaultRelativeGoalsFilePath !== null) {
-      try {
-        const existingGoalsFile =
-          obsidianApp.vault.getAbstractFileByPath(vaultRelativeGoalsFilePath);
-        if (existingGoalsFile instanceof TFile) {
-          await obsidianApp.vault.modify(existingGoalsFile, goalsMarkdown);
-        } else {
-          await obsidianApp.vault.create(vaultRelativeGoalsFilePath, goalsMarkdown);
-        }
-        return true;
-      } catch {
-        return false;
-      }
-    }
-
-    try {
-      await filesystemPromises.writeFile(absoluteGoalsFilePath, goalsMarkdown, {
-        encoding: "utf8",
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async function handleCollectOpenTasksIntoProjectGoals(
-    pinnedProjectId: string,
-  ): Promise<void> {
-    const pinnedProjectFolderPath = resolvePinnedProjectFolderPathById(pinnedProjectId);
-    if (pinnedProjectFolderPath === null) {
-      return;
-    }
-    const collectedOpenTasks = await collectAllOpenTasksForProjectFolder(
-      pinnedProjectFolderPath,
-    );
-    if (collectedOpenTasks.length === 0) {
-      new Notice("No open tasks to collect");
-      return;
-    }
-
-    const collectedTasksSectionMarkdown = buildCollectedOpenTasksSectionMarkdown(
-      collectedOpenTasks,
-      formatDailyNoteBasenameForDate(new Date()),
-    );
-    const absoluteGoalsFilePath = resolveProjectGoalsFilePath(pinnedProjectFolderPath);
-
-    let mergedGoalsMarkdown: string;
-    try {
-      const existingGoalsMarkdown =
-        await readExistingProjectGoalsMarkdownOrTemplate(absoluteGoalsFilePath);
-      mergedGoalsMarkdown = mergeCollectedTasksSectionIntoGoalsMarkdown(
-        existingGoalsMarkdown,
-        collectedTasksSectionMarkdown,
-      );
-    } catch {
-      new Notice("Could not read GOALS.md");
-      return;
-    }
-
-    const wasWritten = await writeProjectGoalsMarkdown(
-      absoluteGoalsFilePath,
-      mergedGoalsMarkdown,
-    );
-    if (!wasWritten) {
-      new Notice("Could not write GOALS.md");
-      return;
-    }
-
-    new Notice(
-      `Collected ${collectedOpenTasks.length} ${collectedOpenTasks.length === 1 ? "task" : "tasks"} into GOALS.md`,
-    );
-    openAbsoluteMarkdownFilePath(absoluteGoalsFilePath);
-    refreshAllDashboardData();
-  }
-
-  function handleClearPinnedProjectShellCommandOutput(
-    pinnedProjectId: string,
-    shellCommandIndex: number,
-  ): void {
-    projectShellCommandsStore.clearCommandRunOutput(
-      buildShellCommandRunKey(pinnedProjectId, shellCommandIndex),
-    );
-  }
-
   function handleCopyProcrastIdeaUuid(ideaUuid: string): void {
     void copyTextToClipboardWithFallback(ideaUuid).then((wasCopied) => {
       new Notice(wasCopied ? "Procrast idea UUID copied" : "Could not copy idea UUID");
@@ -1370,26 +848,12 @@
   {#if selectedPinnedProjectForDetail !== null}
     <PinnedProjectDetail
       pinnedProject={selectedPinnedProjectForDetail}
-      shellCommandRunsByKey={$shellCommandRunsForWidgetData}
+      {obsidianApp}
+      {projectShellCommandsStore}
+      {jiraConnectionSettings}
+      {gitHubActionsStore}
+      {refreshAllDashboardData}
       onBack={handleReturnToPinnedProjectOverview}
-      onOpenChildFile={handleOpenPinnedProjectChildFile}
-      onOpenChildFolder={handleOpenPinnedProjectChildFolder}
-      onRunShellCommand={handleRunPinnedProjectShellCommand}
-      onKillShellCommand={handleKillPinnedProjectShellCommand}
-      onClearShellCommandOutput={handleClearPinnedProjectShellCommandOutput}
-      onCopyClaudeResumeCommand={handleCopyClaudeResumeCommandToClipboard}
-      onRelaunchClaudeSession={handleRelaunchClaudeSession}
-      onStartSessionFromProjectGoals={handleStartClaudeSessionFromProjectGoals}
-      onCreateProjectGoalsFile={handleCreateProjectGoalsFile}
-      onOpenProjectGoalsFile={handleOpenProjectGoalsFile}
-      onCollectOpenTasksIntoProjectGoals={handleCollectOpenTasksIntoProjectGoals}
-      onOpenJiraIssueInBrowser={handleOpenJiraIssueInBrowser}
-      onStartClaudeSessionFromJiraIssue={handleStartClaudeSessionFromJiraIssue}
-      onRefreshGitHubActions={handleRefreshGitHubActions}
-      onDispatchGitHubWorkflow={handleDispatchGitHubWorkflow}
-      onRerunFailedGitHubJobs={handleRerunFailedGitHubJobs}
-      onCancelGitHubRun={handleCancelGitHubRun}
-      onOpenGitHubRunInBrowser={handleOpenGitHubRunInBrowser}
     />
   {:else}
     <main class="widget-grid">
@@ -1523,8 +987,7 @@
             isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("claude-sessions")}
             onToggleCollapsed={() => handleToggleWidgetCollapsed("claude-sessions")}
             pinnedProjects={$pinnedProjectsForWidgetData}
-            onCopyClaudeResumeCommand={handleCopyClaudeResumeCommandToClipboard}
-            onRelaunchClaudeSession={handleRelaunchClaudeSession}
+            {obsidianApp}
           />
         </div>
       {/if}
