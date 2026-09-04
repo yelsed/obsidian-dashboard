@@ -271,7 +271,7 @@
   .project-summary-row {
     width: 100%;
     /* `all: unset` in styles.css resets box-sizing to content-box, so `width: 100%` plus padding
-       and border made this button 26px wider than the list item holding it — the row overflowed
+       and border made this button 26px wider than the list item holding it. The row overflowed
        the panel and the trailing column was pushed past its right edge. */
     box-sizing: border-box;
     display: grid;
@@ -422,8 +422,9 @@
     font-family: var(--vault-dashboard-font-family-mono);
   }
 
+  /* The skeleton row is a single long run of dots, so it needs clipping on top of the shared
+     shimmer styling in styles.css. */
   .row-shimmer {
-    color: var(--vault-dashboard-text-faint);
     overflow: hidden;
   }
 

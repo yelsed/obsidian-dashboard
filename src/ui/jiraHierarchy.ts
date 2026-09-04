@@ -4,6 +4,12 @@ import type {
   JiraSprintSummary,
 } from "../data/jira";
 
+// The grouping key doubles as a Svelte keyed-each identity, so it has to be a string. These two
+// constants are the only place the encoding is written, and describeEpicGroupHeading below is the
+// only place it is decoded.
+const EPIC_GROUP_KEY_PREFIX = "epic:";
+const ISSUES_WITHOUT_AN_EPIC_GROUP_KEY = "no-epic";
+
 export type JiraHierarchySubtaskGroup = {
   parentIssue: JiraIssueParentSummary | null;
   subtasks: JiraIssueSummary[];
@@ -45,20 +51,29 @@ type MutableJiraHierarchySprintGroup = JiraHierarchySprintGroup & {
 export function buildJiraSprintEpicHierarchy(
   issues: JiraIssueSummary[],
 ): JiraHierarchySprintGroup[] {
-  const issuesInJiraOrder = issues;
   const sprintGroups: MutableJiraHierarchySprintGroup[] = [];
   const sprintGroupByKey = new Map<string, MutableJiraHierarchySprintGroup>();
   const taskNodeByIssueKey = new Map<string, JiraHierarchyTaskNode>();
 
-  for (let issueIndex = 0; issueIndex < issuesInJiraOrder.length; issueIndex += 1) {
-    ensureEpicGroupForIssue(issuesInJiraOrder[issueIndex], issueIndex, sprintGroups, sprintGroupByKey);
+  // Seeding every group up front fixes both the sprint order and the epic order to the order Jira
+  // returned the issues in, so the passes below only have to look their group up.
+  const epicGroupByIssueKey = new Map<string, MutableJiraHierarchyEpicGroup>();
+  for (let issueIndex = 0; issueIndex < issues.length; issueIndex += 1) {
+    const issue = issues[issueIndex];
+    epicGroupByIssueKey.set(
+      issue.issueKey,
+      ensureEpicGroupForIssue(issue, issueIndex, sprintGroups, sprintGroupByKey),
+    );
   }
 
-  for (const issue of issuesInJiraOrder) {
+  for (const issue of issues) {
     if (isJiraEpicIssue(issue) || issue.issueTypeIsSubtask) {
       continue;
     }
-    const epicGroup = ensureEpicGroupForIssue(issue, issuesInJiraOrder.indexOf(issue), sprintGroups, sprintGroupByKey);
+    const epicGroup = epicGroupByIssueKey.get(issue.issueKey);
+    if (epicGroup === undefined) {
+      continue;
+    }
     const taskNode: JiraHierarchyTaskNode = {
       taskIssue: issue,
       parentIssue: issue.parentIssue,
@@ -68,16 +83,19 @@ export function buildJiraSprintEpicHierarchy(
     taskNodeByIssueKey.set(issue.issueKey, taskNode);
   }
 
-  for (const issue of issuesInJiraOrder) {
+  for (const issue of issues) {
     if (!isJiraEpicIssue(issue)) {
       continue;
     }
-    const epicGroup = ensureEpicGroupForIssue(issue, issuesInJiraOrder.indexOf(issue), sprintGroups, sprintGroupByKey);
+    const epicGroup = epicGroupByIssueKey.get(issue.issueKey);
+    if (epicGroup === undefined) {
+      continue;
+    }
     epicGroup.epicIssue = issue;
     epicGroup.epicSummaryText = issue.summaryText;
   }
 
-  for (const issue of issuesInJiraOrder) {
+  for (const issue of issues) {
     if (!issue.issueTypeIsSubtask) {
       continue;
     }
@@ -87,7 +105,10 @@ export function buildJiraSprintEpicHierarchy(
       continue;
     }
 
-    const epicGroup = ensureEpicGroupForIssue(issue, issuesInJiraOrder.indexOf(issue), sprintGroups, sprintGroupByKey);
+    const epicGroup = epicGroupByIssueKey.get(issue.issueKey);
+    if (epicGroup === undefined) {
+      continue;
+    }
     const parentGroupKey = issue.parentIssue?.issueKey ?? "no-parent";
     let subtaskGroup = epicGroup.orphanSubtaskGroupByParentKey.get(parentGroupKey);
     if (subtaskGroup === undefined) {
@@ -209,9 +230,27 @@ function ensureEpicGroupForIssue(
 
 function readEpicGroupKeyForIssue(issue: JiraIssueSummary): string {
   if (isJiraEpicIssue(issue)) {
-    return `epic:${issue.issueKey}`;
+    return `${EPIC_GROUP_KEY_PREFIX}${issue.issueKey}`;
   }
-  return issue.epicIssueKey === null ? "no-epic" : `epic:${issue.epicIssueKey}`;
+  return issue.epicIssueKey === null
+    ? ISSUES_WITHOUT_AN_EPIC_GROUP_KEY
+    : `${EPIC_GROUP_KEY_PREFIX}${issue.epicIssueKey}`;
+}
+
+export function describeEpicGroupHeading(
+  epicGroupKey: string,
+  epicSummaryText: string | null,
+): string {
+  if (epicGroupKey === ISSUES_WITHOUT_AN_EPIC_GROUP_KEY) {
+    return "No epic";
+  }
+  const issueKey = epicGroupKey.startsWith(EPIC_GROUP_KEY_PREFIX)
+    ? epicGroupKey.slice(EPIC_GROUP_KEY_PREFIX.length)
+    : epicGroupKey;
+  if (epicSummaryText === null || epicSummaryText.length === 0) {
+    return issueKey;
+  }
+  return `${issueKey}: ${epicSummaryText}`;
 }
 
 function readEpicSummaryTextForIssue(issue: JiraIssueSummary): string | null {

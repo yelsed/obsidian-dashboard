@@ -50,7 +50,7 @@ obsidian-dashboard/
 │   │   ├── graph.ts          # Orphans, hubs, broken links.
 │   │   ├── docker.ts         # Running container detection (Phase 5).
 │   │   ├── githubActions.ts  # Workflow runs, dispatch, re-run, cancel. Shells out to `gh`.
-│   │   └── desktopNotification.ts  # Obsidian Notice + OS notification in one call.
+│   │   └── desktopNotification.ts  # Obsidian Notice plus OS notification in one call.
 │   └── ui/
 │       ├── App.svelte        # Dashboard root. Hosts the tab bar and widget grid.
 │       ├── TabBar.svelte     # Work/Private/... tab switcher.

@@ -211,24 +211,7 @@
     outline-offset: 2px;
   }
 
-  .widget-empty {
-    margin: 0;
-    color: var(--vault-dashboard-text-secondary);
-  }
 
-  .widget-error {
-    margin: 0;
-    color: var(--vault-dashboard-color-status-stopped);
-  }
 
-  .widget-error-hint {
-    margin: var(--vault-dashboard-space-row) 0 0 0;
-    color: var(--vault-dashboard-text-secondary);
-    font-size: var(--vault-dashboard-font-size-label);
-  }
 
-  .row-shimmer {
-    color: var(--vault-dashboard-text-faint);
-    opacity: 0.5;
-  }
 </style>

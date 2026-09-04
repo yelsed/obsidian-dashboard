@@ -17,7 +17,10 @@
  * what has to escape Svelte's scoping.
  */
 
-.vault-dashboard {
+/* The Jira issue browser is an Obsidian modal, so it renders outside the dashboard pane and needs
+   the same token block to reach it. */
+.vault-dashboard,
+.vault-dashboard-jira-issues-modal {
   --vault-dashboard-font-family-mono:
     "JetBrains Mono",
     "Berkeley Mono",
@@ -84,6 +87,10 @@
   --vault-dashboard-color-freshness-active: var(--color-green);
   --vault-dashboard-color-freshness-cooling: var(--color-yellow);
   --vault-dashboard-color-freshness-cold: var(--text-faint);
+
+  /* The only elevation in the dashboard: a popover panel that has to read as floating above the
+     row it was opened from. */
+  --vault-dashboard-shadow-overlay: 0 4px 12px rgba(0, 0, 0, 0.35);
 
   --vault-dashboard-motion-duration-instant: 60ms;
   --vault-dashboard-motion-duration-quick: 120ms;
@@ -337,25 +344,27 @@
 .vault-dashboard-jira-issues-modal-epic-heading,
 .vault-dashboard-jira-issues-modal-orphans-heading {
   margin: 0 0 6px;
-  color: var(--text-faint);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  color: var(--vault-dashboard-text-faint);
+  font-size: var(--vault-dashboard-font-size-label);
+  font-weight: var(--vault-dashboard-font-weight-bold);
+  letter-spacing: var(--vault-dashboard-letter-spacing-uppercase);
   text-transform: uppercase;
 }
 
+/* Fixed key, status and due tracks: each row is its own grid container, so an `auto` track would
+   be measured from that row's own text and the columns would stagger down the list. */
 .vault-dashboard-jira-issues-modal-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-columns: 12ch minmax(0, 1fr) 12ch 15ch auto;
   align-items: baseline;
-  gap: 12px;
+  gap: var(--vault-dashboard-space-inline);
   padding: 6px 4px;
   border-bottom: 1px solid var(--background-modifier-border);
   font-size: 12px;
 }
 
 .vault-dashboard-jira-issues-modal-row-subtask {
-  grid-template-columns: auto auto minmax(0, 1fr) auto auto auto;
+  grid-template-columns: 2ch 12ch minmax(0, 1fr) 12ch 15ch auto;
 }
 
 .vault-dashboard-jira-issues-modal-key {
@@ -431,6 +440,29 @@
 .vault-dashboard-jira-issues-modal-fix:hover {
   color: var(--color-cyan);
   border-color: var(--color-cyan);
+}
+
+/* Empty, error and skeleton states read the same in every widget, so they live here rather than
+   being restated in each component's scoped styles. */
+.vault-dashboard .widget-empty {
+  margin: 0;
+  color: var(--vault-dashboard-text-secondary);
+}
+
+.vault-dashboard .widget-error {
+  margin: 0;
+  color: var(--vault-dashboard-color-status-stopped);
+}
+
+.vault-dashboard .widget-error-hint {
+  margin: var(--vault-dashboard-space-row) 0 0 0;
+  color: var(--vault-dashboard-text-secondary);
+  font-size: var(--vault-dashboard-font-size-label);
+}
+
+.vault-dashboard .row-shimmer {
+  color: var(--vault-dashboard-text-faint);
+  opacity: 0.5;
 }
 
 /* Settings: each dashboard tab is a collapsible accordion so the page is

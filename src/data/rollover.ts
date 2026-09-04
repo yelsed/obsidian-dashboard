@@ -16,9 +16,13 @@ export type RolloverResult = {
 
 const DAILY_NOTE_BASENAME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const MAXIMUM_DAYS_TO_SCAN_FOR_WORKING_DAY = 7;
-const LIST_ITEM_LINE_PATTERN = /^[\s>]*[-*+]/;
-const MIGRATED_TASK_INDENTATION_UNIT = "\t";
-const SPACES_PER_TAB_STOP = 4;
+const LIST_ITEM_LINE_PATTERN = /^[\s>]*[-*+]\s/;
+const DEFAULT_SPACES_PER_TAB_STOP = 4;
+
+type VaultIndentationStyle = {
+  indentationUnit: string;
+  spacesPerTabStop: number;
+};
 
 export async function rollOverOpenTasksIntoCurrentDailyNote(
   obsidianApplication: App,
@@ -47,7 +51,14 @@ export async function rollOverOpenTasksIntoCurrentDailyNote(
   const destinationFile = resolveExistingFile(obsidianApplication, destinationPath);
   const destinationContents =
     destinationFile === null ? "" : await obsidianApplication.vault.read(destinationFile);
-  const alreadyPresentTaskContents = new Set<string>(extractOpenTaskContents(destinationContents));
+  // Tasks that already sit in the destination note are skipped, but they can never become the
+  // parent of an appended task either: the appended block lands at the end of the note, too far
+  // from those lines for indentation to read as belonging to them.
+  const taskContentsAlreadyInDestinationNote = new Set<string>(
+    extractOpenTaskContents(destinationContents),
+  );
+  const appendedTaskContents = new Set<string>();
+  const vaultIndentationStyle = resolveVaultIndentationStyle(obsidianApplication);
 
   const taskLinesToAppend: string[] = [];
 
@@ -59,15 +70,18 @@ export async function rollOverOpenTasksIntoCurrentDailyNote(
 
     for (let lineIndex = 0; lineIndex < sourceLines.length; lineIndex++) {
       const sourceLine = sourceLines[lineIndex];
+      const matchedOpenTask = sourceLine.match(OPEN_TASK_LINE_PATTERN);
       // Every list item closes the subtrees at or below its own depth, whether or not it migrates.
       // A completed parent therefore stops adopting its unfinished children on the new day.
-      if (!LIST_ITEM_LINE_PATTERN.test(sourceLine)) {
+      if (matchedOpenTask === null && !LIST_ITEM_LINE_PATTERN.test(sourceLine)) {
         continue;
       }
-      const indentationWidth = measureIndentationWidth(sourceLine);
+      const indentationWidth = measureIndentationWidth(
+        sourceLine,
+        vaultIndentationStyle.spacesPerTabStop,
+      );
       dropAncestorsAtOrDeeperThan(migratedAncestorIndentationWidths, indentationWidth);
 
-      const matchedOpenTask = sourceLine.match(OPEN_TASK_LINE_PATTERN);
       if (matchedOpenTask === null) {
         continue;
       }
@@ -76,14 +90,22 @@ export async function rollOverOpenTasksIntoCurrentDailyNote(
         continue;
       }
 
-      if (!alreadyPresentTaskContents.has(taskContent)) {
-        alreadyPresentTaskContents.add(taskContent);
-        const migratedIndentation = MIGRATED_TASK_INDENTATION_UNIT.repeat(
+      if (taskContentsAlreadyInDestinationNote.has(taskContent)) {
+        sourceLines[lineIndex] = markTaskLineAsMigrated(sourceLine);
+        sourceWasModified = true;
+        continue;
+      }
+
+      if (!appendedTaskContents.has(taskContent)) {
+        appendedTaskContents.add(taskContent);
+        const migratedIndentation = vaultIndentationStyle.indentationUnit.repeat(
           migratedAncestorIndentationWidths.length,
         );
         taskLinesToAppend.push(`${migratedIndentation}- [ ] ${taskContent}`);
-        migratedAncestorIndentationWidths.push(indentationWidth);
       }
+      // A task that reached the appended block, whether on this line or from an earlier daily
+      // note, can still adopt the subtasks that follow it here.
+      migratedAncestorIndentationWidths.push(indentationWidth);
       sourceLines[lineIndex] = markTaskLineAsMigrated(sourceLine);
       sourceWasModified = true;
     }
@@ -134,7 +156,7 @@ function dropAncestorsAtOrDeeperThan(
   }
 }
 
-function measureIndentationWidth(taskLine: string): number {
+function measureIndentationWidth(taskLine: string, spacesPerTabStop: number): number {
   let indentationWidth = 0;
   for (const character of taskLine) {
     if (character === " ") {
@@ -142,12 +164,41 @@ function measureIndentationWidth(taskLine: string): number {
       continue;
     }
     if (character === "\t") {
-      indentationWidth += SPACES_PER_TAB_STOP;
+      indentationWidth += spacesPerTabStop;
+      continue;
+    }
+    // A blockquote marker carries no nesting of its own, so a quoted task tree keeps the depths
+    // its own indentation describes.
+    if (character === ">") {
       continue;
     }
     return indentationWidth;
   }
   return indentationWidth;
+}
+
+// Obsidian lets each vault choose tabs or spaces for list indentation, and the rolled-over tasks
+// have to match or they render at the wrong depth in the destination note.
+function resolveVaultIndentationStyle(obsidianApplication: App): VaultIndentationStyle {
+  const vaultWithEditorConfiguration = obsidianApplication.vault as unknown as {
+    getConfig?: (configurationKey: string) => unknown;
+  };
+  const readEditorConfiguration = vaultWithEditorConfiguration.getConfig?.bind(
+    vaultWithEditorConfiguration,
+  );
+
+  const configuredTabSize = readEditorConfiguration?.("tabSize");
+  const spacesPerTabStop =
+    typeof configuredTabSize === "number" && configuredTabSize > 0
+      ? configuredTabSize
+      : DEFAULT_SPACES_PER_TAB_STOP;
+
+  const vaultIndentsWithTabs = readEditorConfiguration?.("useTab") !== false;
+
+  return {
+    indentationUnit: vaultIndentsWithTabs ? "\t" : " ".repeat(spacesPerTabStop),
+    spacesPerTabStop,
+  };
 }
 
 function collectOverduePastDailyNotes(

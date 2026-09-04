@@ -54,7 +54,7 @@
     createGitHubActionsStore,
     type TrackedGitHubProject,
   } from "../data/githubActions";
-  import { announceToUser } from "../data/desktopNotification";
+  import { showNoticeAndDesktopNotification } from "../data/desktopNotification";
   import { openPlanProcrastIdeaFlow } from "./PlanProcrastIdeaModal";
   import { confirmMarkProcrastIdeaDone } from "./ConfirmProcrastIdeaDoneModal";
   import { ProcrastIdeaDetailsModal } from "./ProcrastIdeaDetailsModal";
@@ -81,6 +81,22 @@
 
   const initialSettingsSnapshot = get(settingsStore);
   const initialActiveTab = resolveActiveTab(initialSettingsSnapshot);
+
+  // Several stores need to be told about a settings change exactly once. A reactive statement runs
+  // again whenever anything it reads changes, so each of those hand-offs is guarded by the key it
+  // last acted on.
+  function createChangeApplier(
+    initialKey: string,
+  ): (currentKey: string, applyChange: () => void) => void {
+    let lastAppliedKey = initialKey;
+    return (currentKey, applyChange) => {
+      if (currentKey === lastAppliedKey) {
+        return;
+      }
+      lastAppliedKey = currentKey;
+      applyChange();
+    };
+  }
 
   const recentlyModifiedFilesStore = createRecentlyModifiedFilesStore(
     obsidianApp,
@@ -165,7 +181,7 @@
         return;
       }
       const { finishedRun, projectDisplayName } = runCompletionEvent;
-      announceToUser(
+      showNoticeAndDesktopNotification(
         `${finishedRun.workflowName} ${finishedRun.runConclusion ?? "completed"}`,
         `on ${finishedRun.headBranchName} · ${projectDisplayName}`,
       );
@@ -275,11 +291,10 @@
     )
     .join("\n");
 
-  let lastAppliedPinnedProjectsConfigKey: string = activePinnedProjectsConfigKey;
-  $: if (activePinnedProjectsConfigKey !== lastAppliedPinnedProjectsConfigKey) {
-    lastAppliedPinnedProjectsConfigKey = activePinnedProjectsConfigKey;
-    pinnedProjectsStore.setPinnedProjectsConfig(activePinnedProjectsConfig);
-  }
+  const applyPinnedProjectsConfigWhenChanged = createChangeApplier(activePinnedProjectsConfigKey);
+  $: applyPinnedProjectsConfigWhenChanged(activePinnedProjectsConfigKey, () =>
+    pinnedProjectsStore.setPinnedProjectsConfig(activePinnedProjectsConfig),
+  );
 
   $: jiraConnectionSettings = currentSettings.jiraConnection;
   $: jiraConnectionSettingsKey = [
@@ -289,20 +304,18 @@
     String(jiraConnectionSettings.showOnlyIssuesAssignedToCurrentUser),
   ].join("::");
 
-  let lastAppliedJiraConnectionSettingsKey: string = jiraConnectionSettingsKey;
-  $: if (jiraConnectionSettingsKey !== lastAppliedJiraConnectionSettingsKey) {
-    lastAppliedJiraConnectionSettingsKey = jiraConnectionSettingsKey;
-    jiraIssuesStore.setConnectionSettings(jiraConnectionSettings);
-  }
+  const applyJiraConnectionSettingsWhenChanged = createChangeApplier(jiraConnectionSettingsKey);
+  $: applyJiraConnectionSettingsWhenChanged(jiraConnectionSettingsKey, () =>
+    jiraIssuesStore.setConnectionSettings(jiraConnectionSettings),
+  );
 
   $: activeJiraProjectKeys = collectJiraProjectKeysFromPinnedProjects(activePinnedProjectsConfig);
   $: activeJiraProjectKeysKey = activeJiraProjectKeys.join(",");
 
-  let lastAppliedJiraProjectKeysKey: string = activeJiraProjectKeysKey;
-  $: if (activeJiraProjectKeysKey !== lastAppliedJiraProjectKeysKey) {
-    lastAppliedJiraProjectKeysKey = activeJiraProjectKeysKey;
-    jiraIssuesStore.setProjectKeysToQuery(activeJiraProjectKeys);
-  }
+  const applyJiraProjectKeysWhenChanged = createChangeApplier(activeJiraProjectKeysKey);
+  $: applyJiraProjectKeysWhenChanged(activeJiraProjectKeysKey, () =>
+    jiraIssuesStore.setProjectKeysToQuery(activeJiraProjectKeys),
+  );
 
   $: trackedGitHubProjects = buildTrackedGitHubProjectsFromPinnedProjects(activePinnedProjectsConfig);
   $: trackedGitHubProjectsKey = trackedGitHubProjects
@@ -311,17 +324,17 @@
     )
     .join("\n");
 
-  let lastAppliedTrackedGitHubProjectsKey: string = trackedGitHubProjectsKey;
-  $: if (trackedGitHubProjectsKey !== lastAppliedTrackedGitHubProjectsKey) {
-    lastAppliedTrackedGitHubProjectsKey = trackedGitHubProjectsKey;
-    gitHubActionsStore.setTrackedProjects(trackedGitHubProjects);
-  }
+  const applyTrackedGitHubProjectsWhenChanged = createChangeApplier(trackedGitHubProjectsKey);
+  $: applyTrackedGitHubProjectsWhenChanged(trackedGitHubProjectsKey, () =>
+    gitHubActionsStore.setTrackedProjects(trackedGitHubProjects),
+  );
 
-  let lastAppliedProcrastIdeaFolderMappingsKey: string = activeProcrastIdeaFolderMappingsKey;
-  $: if (activeProcrastIdeaFolderMappingsKey !== lastAppliedProcrastIdeaFolderMappingsKey) {
-    lastAppliedProcrastIdeaFolderMappingsKey = activeProcrastIdeaFolderMappingsKey;
-    pinnedProjectsStore.setProcrastIdeaFolderMappings(activeProcrastIdeaFolderMappings);
-  }
+  const applyProcrastIdeaFolderMappingsWhenChanged = createChangeApplier(
+    activeProcrastIdeaFolderMappingsKey,
+  );
+  $: applyProcrastIdeaFolderMappingsWhenChanged(activeProcrastIdeaFolderMappingsKey, () =>
+    pinnedProjectsStore.setProcrastIdeaFolderMappings(activeProcrastIdeaFolderMappings),
+  );
 
   $: selectedPinnedProjectForDetail =
     selectedPinnedProjectIdForDetail === null
@@ -461,33 +474,6 @@
         displayName: pinnedProject.displayName,
         folderPath: pinnedProject.folderPath,
       }));
-  }
-
-  function handleRefreshGitHubActions(): void {
-    gitHubActionsStore.refreshNow();
-  }
-
-  function handleDispatchGitHubWorkflow(
-    pinnedProjectId: string,
-    workflowFilePath: string,
-    branchName: string,
-  ): void {
-    void gitHubActionsStore.dispatchWorkflow(pinnedProjectId, workflowFilePath, branchName);
-  }
-
-  function handleRerunFailedGitHubJobs(pinnedProjectId: string, runDatabaseId: number): void {
-    void gitHubActionsStore.rerunFailedJobsOfRun(pinnedProjectId, runDatabaseId);
-  }
-
-  function handleCancelGitHubRun(pinnedProjectId: string, runDatabaseId: number): void {
-    void gitHubActionsStore.cancelRun(pinnedProjectId, runDatabaseId);
-  }
-
-  function handleOpenGitHubRunInBrowser(runBrowserUrl: string): void {
-    if (runBrowserUrl.length === 0) {
-      return;
-    }
-    void shell.openExternal(runBrowserUrl);
   }
 
   function resolvePinnedProjectForWidgetById(pinnedProjectId: string) {
@@ -1385,11 +1371,7 @@
       onCollectOpenTasksIntoProjectGoals={handleCollectOpenTasksIntoProjectGoals}
       onOpenJiraIssueInBrowser={handleOpenJiraIssueInBrowser}
       onStartClaudeSessionFromJiraIssue={handleStartClaudeSessionFromJiraIssue}
-      onRefreshGitHubActions={handleRefreshGitHubActions}
-      onDispatchGitHubWorkflow={handleDispatchGitHubWorkflow}
-      onRerunFailedGitHubJobs={handleRerunFailedGitHubJobs}
-      onCancelGitHubRun={handleCancelGitHubRun}
-      onOpenGitHubRunInBrowser={handleOpenGitHubRunInBrowser}
+      {gitHubActionsStore}
     />
   {:else}
     <main class="widget-grid">

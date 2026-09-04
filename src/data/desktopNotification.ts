@@ -1,7 +1,7 @@
 import { Notice } from "obsidian";
 
-export function announceToUser(titleText: string, bodyText: string): void {
-  new Notice(`${titleText} — ${bodyText}`);
+export function showNoticeAndDesktopNotification(titleText: string, bodyText: string): void {
+  new Notice(`${titleText}: ${bodyText}`);
 
   if (typeof Notification === "undefined") {
     return;

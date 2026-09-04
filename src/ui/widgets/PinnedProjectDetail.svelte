@@ -2,8 +2,9 @@
   import { formatRelativeModifiedTime } from "../../data/format";
   import type { PinnedProjectForWidget } from "../../data/pinnedProjects";
   import type { ShellCommandRunSnapshot } from "../../data/projectShellCommands";
-  import { buildJiraSprintEpicHierarchy } from "../jiraHierarchy";
+  import { buildJiraSprintEpicHierarchy, describeEpicGroupHeading } from "../jiraHierarchy";
   import ProjectGitHubActions from "./ProjectGitHubActions.svelte";
+  import type { GitHubActionsStore } from "../../data/githubActions";
 
   type FileTreeRow =
     | {
@@ -45,11 +46,7 @@
   export let onCollectOpenTasksIntoProjectGoals: (pinnedProjectId: string) => void = () => {};
   export let onOpenJiraIssueInBrowser: (issueBrowserUrl: string) => void = () => {};
   export let onStartClaudeSessionFromJiraIssue: (pinnedProjectId: string, issueKey: string) => void = () => {};
-  export let onRefreshGitHubActions: () => void = () => {};
-  export let onDispatchGitHubWorkflow: (pinnedProjectId: string, workflowFilePath: string, branchName: string) => void = () => {};
-  export let onRerunFailedGitHubJobs: (pinnedProjectId: string, runDatabaseId: number) => void = () => {};
-  export let onCancelGitHubRun: (pinnedProjectId: string, runDatabaseId: number) => void = () => {};
-  export let onOpenGitHubRunInBrowser: (runBrowserUrl: string) => void = () => {};
+  export let gitHubActionsStore: GitHubActionsStore;
 
   const MAXIMUM_VISIBLE_CONTAINER_CELLS = 4;
   const FRESHNESS_GLYPH_BY_LEVEL = {
@@ -123,11 +120,6 @@
     return ideaUuid.length > 8 ? ideaUuid.slice(0, 8) : ideaUuid;
   }
 
-  function describeEpicHeading(epicKey: string, summaryText: string | null): string {
-    if (epicKey === "no-epic") return "No epic";
-    const issueKey = epicKey.startsWith("epic:") ? epicKey.slice(5) : epicKey;
-    return summaryText === null || summaryText.length === 0 ? issueKey : `${issueKey} — ${summaryText}`;
-  }
 
   function buildFileTreeRows(
     childMarkdownFiles: PinnedProjectForWidget["childMarkdownFiles"],
@@ -282,11 +274,7 @@
     <ProjectGitHubActions
       pinnedProjectId={pinnedProject.id}
       gitHubActionsSnapshot={pinnedProject.gitHubActionsSnapshot}
-      onRefresh={onRefreshGitHubActions}
-      onDispatchWorkflow={onDispatchGitHubWorkflow}
-      onRerunFailedJobs={onRerunFailedGitHubJobs}
-      onCancelRun={onCancelGitHubRun}
-      onOpenRunInBrowser={onOpenGitHubRunInBrowser}
+      {gitHubActionsStore}
     />
 
     <section class="project-detail-section">
@@ -301,7 +289,7 @@
               <ul class="jira-hierarchy-epic-list">
                 {#each sprintGroup.epicGroups as epicGroup (epicGroup.epicKey)}
                   <li class="jira-hierarchy-epic">
-                    <h5>{describeEpicHeading(epicGroup.epicKey, epicGroup.epicSummaryText)}</h5>
+                    <h5>{describeEpicGroupHeading(epicGroup.epicKey, epicGroup.epicSummaryText)}</h5>
                     <ul class="jira-hierarchy-task-list">
                       {#each epicGroup.tasks as taskNode (taskNode.taskIssue?.issueKey ?? taskNode.parentIssue?.issueKey ?? "task")}
                         {@const taskIssue = taskNode.taskIssue}
@@ -616,12 +604,15 @@
     min-width: 0;
   }
 
+  /* Fixed key and status tracks so the issue keys and statuses line up down the list. Each row is
+     its own grid container, so an `auto` track would be measured from that row alone. */
   .jira-issue-row {
+    grid-template-columns: 12ch minmax(0, 1fr) 12ch auto;
     padding: 2px 0;
   }
 
   .jira-issue-row-subtask {
-    grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+    grid-template-columns: 2ch 12ch minmax(0, 1fr) 12ch auto;
   }
 
   .project-detail-button,
@@ -780,7 +771,9 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .is-pulsing { animation: none; }
+    .is-pulsing {
+      animation: none;
+    }
   }
 
   @media (max-width: 640px) {

@@ -300,10 +300,6 @@
     white-space: nowrap;
   }
 
-  .widget-empty {
-    margin: 0;
-    color: var(--vault-dashboard-text-secondary);
-  }
 
   .widget-footnote {
     margin: var(--vault-dashboard-space-panel-inner) 0 0 0;

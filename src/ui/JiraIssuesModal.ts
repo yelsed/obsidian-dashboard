@@ -1,6 +1,6 @@
 import { App, Modal, Setting } from "obsidian";
 import type { JiraIssueSummary } from "../data/jira";
-import { buildJiraSprintEpicHierarchy } from "./jiraHierarchy";
+import { buildJiraSprintEpicHierarchy, describeEpicGroupHeading } from "./jiraHierarchy";
 
 export type JiraIssuesModalParameters = {
   jiraProjectKey: string;
@@ -90,7 +90,7 @@ export class JiraIssuesModal extends Modal {
           cls: "vault-dashboard-jira-issues-modal-epic",
         });
         epicItemElement.createEl("h4", {
-          text: describeEpicHeading(epicGroup.epicKey, epicGroup.epicSummaryText),
+          text: describeEpicGroupHeading(epicGroup.epicKey, epicGroup.epicSummaryText),
           cls: "vault-dashboard-jira-issues-modal-epic-heading",
         });
 
@@ -214,10 +214,3 @@ function filterIssues(issues: JiraIssueSummary[], searchText: string): JiraIssue
   });
 }
 
-function describeEpicHeading(epicKey: string, summaryText: string | null): string {
-  if (epicKey === "no-epic") {
-    return "No epic";
-  }
-  const issueKey = epicKey.startsWith("epic:") ? epicKey.slice(5) : epicKey;
-  return summaryText === null || summaryText.length === 0 ? issueKey : `${issueKey} — ${summaryText}`;
-}

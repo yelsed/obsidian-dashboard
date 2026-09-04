@@ -311,7 +311,7 @@ export function createGitHubActionsStore(): GitHubActionsStore {
   }
 
   // A poll chain re-schedules itself from inside its own completion callback. Stopping it
-  // therefore cannot rely on clearing the pending timeout alone — a cycle already awaiting
+  // therefore cannot rely on clearing the pending timeout alone. A cycle already awaiting
   // `gh` would re-schedule after the stop and run alongside the chain that replaced it. The
   // generation counter lets an in-flight cycle notice that it has been superseded.
   function scheduleNextPollCycle(delayMilliseconds: number): void {
@@ -555,7 +555,7 @@ async function readDispatchableWorkflows(
 }
 
 // The REST branch list is alphabetical and carries no commit dates, so it cannot answer
-// "which branch did I touch last". GraphQL can, in one request — but unlike `gh api`, it has
+// "which branch did I touch last". GraphQL can, in one request, but unlike `gh api` it has
 // no {owner}/{repo} placeholders, so the slug has to be resolved first. It never changes for
 // a given folder, hence the cache.
 const repositoryNameWithOwnerByFolderPath = new Map<string, string>();

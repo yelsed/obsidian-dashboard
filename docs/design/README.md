@@ -214,12 +214,12 @@ inline expansion and no per-project action buttons. Row columns, left to right:
 3. **Docker count summary** — `3/4 up`, `idle` (no containers paired but Docker
    is reachable), `no docker` (Docker CLI not on `$PATH`).
 4. **Jira open count**, only when Jira is configured for the project.
-5. **Freshness glyph** — `●` (active <7d), `◐` (cooling <30d), `○` (cold ≥30d),
+5. **Freshness glyph**: `●` (active <7d), `◐` (cooling <30d), `○` (cold ≥30d),
    plus the last modified relative timestamp.
 6. **Markdown note count** inside the folder.
 7. **Last Claude Code session age**, when a session was found for the folder.
 8. **Origin badge**, when the project was pinned from Procrast.
-9. **Detail affordance** — `detail ▸`; clicking anywhere on the row opens the
+9. **Detail affordance**: `detail ▸`. Clicking anywhere on the row opens the
    page-level project detail view.
 
 **Detail page**
