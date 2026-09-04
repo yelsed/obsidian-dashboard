@@ -16,6 +16,9 @@ export type RolloverResult = {
 
 const DAILY_NOTE_BASENAME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const MAXIMUM_DAYS_TO_SCAN_FOR_WORKING_DAY = 7;
+const LIST_ITEM_LINE_PATTERN = /^[\s>]*[-*+]/;
+const MIGRATED_TASK_INDENTATION_UNIT = "\t";
+const SPACES_PER_TAB_STOP = 4;
 
 export async function rollOverOpenTasksIntoCurrentDailyNote(
   obsidianApplication: App,
@@ -52,9 +55,19 @@ export async function rollOverOpenTasksIntoCurrentDailyNote(
     const sourceContents = await obsidianApplication.vault.read(sourceDailyNote);
     const sourceLines = sourceContents.split("\n");
     let sourceWasModified = false;
+    const migratedAncestorIndentationWidths: number[] = [];
 
     for (let lineIndex = 0; lineIndex < sourceLines.length; lineIndex++) {
-      const matchedOpenTask = sourceLines[lineIndex].match(OPEN_TASK_LINE_PATTERN);
+      const sourceLine = sourceLines[lineIndex];
+      // Every list item closes the subtrees at or below its own depth, whether or not it migrates.
+      // A completed parent therefore stops adopting its unfinished children on the new day.
+      if (!LIST_ITEM_LINE_PATTERN.test(sourceLine)) {
+        continue;
+      }
+      const indentationWidth = measureIndentationWidth(sourceLine);
+      dropAncestorsAtOrDeeperThan(migratedAncestorIndentationWidths, indentationWidth);
+
+      const matchedOpenTask = sourceLine.match(OPEN_TASK_LINE_PATTERN);
       if (matchedOpenTask === null) {
         continue;
       }
@@ -65,9 +78,13 @@ export async function rollOverOpenTasksIntoCurrentDailyNote(
 
       if (!alreadyPresentTaskContents.has(taskContent)) {
         alreadyPresentTaskContents.add(taskContent);
-        taskLinesToAppend.push(`- [ ] ${taskContent}`);
+        const migratedIndentation = MIGRATED_TASK_INDENTATION_UNIT.repeat(
+          migratedAncestorIndentationWidths.length,
+        );
+        taskLinesToAppend.push(`${migratedIndentation}- [ ] ${taskContent}`);
+        migratedAncestorIndentationWidths.push(indentationWidth);
       }
-      sourceLines[lineIndex] = markTaskLineAsMigrated(sourceLines[lineIndex]);
+      sourceLines[lineIndex] = markTaskLineAsMigrated(sourceLine);
       sourceWasModified = true;
     }
 
@@ -98,6 +115,39 @@ export async function rollOverOpenTasksIntoCurrentDailyNote(
     destinationDailyNoteBasename,
     destinationIsToday,
   };
+}
+
+// A subtask is only worth carrying over when it stays underneath the task it belongs to, so the
+// destination indentation is rebuilt from how deep the task sits among the tasks that actually
+// migrated with it. Ancestors that stayed behind (already completed, or already present in the
+// destination note) collapse away instead of leaving the subtask stranded under an unrelated task.
+function dropAncestorsAtOrDeeperThan(
+  migratedAncestorIndentationWidths: number[],
+  indentationWidth: number,
+): void {
+  while (
+    migratedAncestorIndentationWidths.length > 0 &&
+    migratedAncestorIndentationWidths[migratedAncestorIndentationWidths.length - 1] >=
+      indentationWidth
+  ) {
+    migratedAncestorIndentationWidths.pop();
+  }
+}
+
+function measureIndentationWidth(taskLine: string): number {
+  let indentationWidth = 0;
+  for (const character of taskLine) {
+    if (character === " ") {
+      indentationWidth += 1;
+      continue;
+    }
+    if (character === "\t") {
+      indentationWidth += SPACES_PER_TAB_STOP;
+      continue;
+    }
+    return indentationWidth;
+  }
+  return indentationWidth;
 }
 
 function collectOverduePastDailyNotes(
