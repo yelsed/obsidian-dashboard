@@ -1,6 +1,11 @@
 <script lang="ts">
+  import type { App as ObsidianApplication } from "obsidian";
   import { formatRelativeModifiedTime } from "../../data/format";
   import type { PinnedProjectForWidget } from "../../data/pinnedProjects";
+  import {
+    copyClaudeResumeCommandToClipboard,
+    relaunchClaudeSessionInTerminal,
+  } from "../../data/claudeTerminal";
   import WidgetPanel from "./WidgetPanel.svelte";
 
   type FlattenedClaudeSession = {
@@ -15,7 +20,7 @@
     editedFileTotalCount: number;
     totalMessageCount: number;
     gitBranch: string | null;
-    projectId: string;
+    projectFolderPath: string;
     projectDisplayName: string;
   };
 
@@ -41,14 +46,7 @@
   export let pinnedProjects: PinnedProjectForWidget[] = [];
   export let isCollapsed: boolean = false;
   export let onToggleCollapsed: () => void = () => {};
-  export let onCopyClaudeResumeCommand: (
-    pinnedProjectId: string,
-    sessionId: string,
-  ) => void = () => {};
-  export let onRelaunchClaudeSession: (
-    pinnedProjectId: string,
-    sessionId: string,
-  ) => void = () => {};
+  export let obsidianApp: ObsidianApplication;
 
   $: flattenedRecentSessions = flattenSessionsAcrossPinnedProjects(pinnedProjects);
 
@@ -70,7 +68,7 @@
           editedFileTotalCount: claudeSession.editedFileTotalCount,
           totalMessageCount: claudeSession.totalMessageCount,
           gitBranch: claudeSession.gitBranch,
-          projectId: pinnedProject.id,
+          projectFolderPath: pinnedProject.folderPath,
           projectDisplayName:
             pinnedProject.displayName.length > 0
               ? pinnedProject.displayName
@@ -96,13 +94,13 @@
     <p class="widget-empty">No Claude sessions in pinned projects yet.</p>
   {:else}
     <ul class="claude-session-list">
-      {#each flattenedRecentSessions as claudeSession (claudeSession.projectId + "::" + claudeSession.sessionId)}
+      {#each flattenedRecentSessions as claudeSession (claudeSession.projectFolderPath + "::" + claudeSession.sessionId)}
         <li class="claude-session-row">
           <button
             type="button"
             class="claude-session-button"
             title="Copy claude --resume {claudeSession.sessionId} to clipboard"
-            on:click={() => onCopyClaudeResumeCommand(claudeSession.projectId, claudeSession.sessionId)}
+            on:click={() => copyClaudeResumeCommandToClipboard(claudeSession.projectFolderPath, claudeSession.sessionId)}
           >
             <span class="claude-session-row-top">
               <span class="claude-session-project">{claudeSession.projectDisplayName}</span>
@@ -128,7 +126,7 @@
             type="button"
             class="claude-session-relaunch-button"
             title="Resume this session in the Obsidian Claude Code terminal"
-            on:click={() => onRelaunchClaudeSession(claudeSession.projectId, claudeSession.sessionId)}
+            on:click={() => relaunchClaudeSessionInTerminal(obsidianApp, claudeSession.projectFolderPath, claudeSession.sessionId)}
           >
             <span class="claude-session-relaunch-glyph" aria-hidden="true">▶</span>
             resume

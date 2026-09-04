@@ -1,7 +1,40 @@
 <script lang="ts">
+  import { promises as filesystemPromises } from "fs";
+  import nodePath from "path";
+  import { shell } from "electron";
+  import { Notice, TFile, type App as ObsidianApplication } from "obsidian";
   import { formatRelativeModifiedTime } from "../../data/format";
-  import type { PinnedProjectForWidget } from "../../data/pinnedProjects";
-  import type { ShellCommandRunSnapshot } from "../../data/projectShellCommands";
+  import {
+    collectAllOpenTasksForProjectFolder,
+    type PinnedProjectForWidget,
+  } from "../../data/pinnedProjects";
+  import {
+    buildShellCommandRunKey,
+    type ProjectShellCommandsStore,
+    type ShellCommandRunSnapshot,
+  } from "../../data/projectShellCommands";
+  import {
+    copyClaudeResumeCommandToClipboard,
+    relaunchClaudeSessionInTerminal,
+    startClaudeSessionWithPrompt,
+  } from "../../data/claudeTerminal";
+  import { startClaudeSessionForJiraIssue } from "../../data/jiraClaudeHandoff";
+  import {
+    buildCollectedOpenTasksSectionMarkdown,
+    buildProjectGoalsPlanningPrompt,
+    isFileAlreadyExistsError,
+    isFileNotFoundError,
+    mergeCollectedTasksSectionIntoGoalsMarkdown,
+    readExistingProjectGoalsMarkdownOrTemplate,
+    resolveProjectGoalsFilePath,
+    writeProjectGoalsMarkdown,
+    PROJECT_GOALS_FILE_TEMPLATE,
+  } from "../../data/projectGoals";
+  import {
+    openAbsoluteMarkdownFilePath,
+    resolveVaultRelativeFilePathIfWithinVault,
+  } from "../../data/vaultFilePaths";
+  import { formatDailyNoteBasenameForDate, type JiraConnectionSettings } from "../../settings";
   import { buildJiraSprintEpicHierarchy, describeEpicGroupHeading } from "../jiraHierarchy";
   import ProjectGitHubActions from "./ProjectGitHubActions.svelte";
   import type { GitHubActionsStore } from "../../data/githubActions";
@@ -31,22 +64,212 @@
     fileRows: Extract<FileTreeRow, { rowType: "file" }>[];
   };
   export let pinnedProject: PinnedProjectForWidget;
-  export let shellCommandRunsByKey: Record<string, ShellCommandRunSnapshot> = {};
-  export let onBack: () => void = () => {};
-  export let onOpenChildFile: (pinnedProjectId: string, relativeFilePath: string) => void = () => {};
-  export let onOpenChildFolder: (pinnedProjectId: string, relativeFolderPath: string) => void = () => {};
-  export let onRunShellCommand: (pinnedProjectId: string, shellCommandIndex: number, commandLine: string) => void = () => {};
-  export let onKillShellCommand: (pinnedProjectId: string, shellCommandIndex: number) => void = () => {};
-  export let onClearShellCommandOutput: (pinnedProjectId: string, shellCommandIndex: number) => void = () => {};
-  export let onCopyClaudeResumeCommand: (pinnedProjectId: string, sessionId: string) => void = () => {};
-  export let onRelaunchClaudeSession: (pinnedProjectId: string, sessionId: string) => void = () => {};
-  export let onStartSessionFromProjectGoals: (pinnedProjectId: string) => void = () => {};
-  export let onCreateProjectGoalsFile: (pinnedProjectId: string) => void = () => {};
-  export let onOpenProjectGoalsFile: (pinnedProjectId: string) => void = () => {};
-  export let onCollectOpenTasksIntoProjectGoals: (pinnedProjectId: string) => void = () => {};
-  export let onOpenJiraIssueInBrowser: (issueBrowserUrl: string) => void = () => {};
-  export let onStartClaudeSessionFromJiraIssue: (pinnedProjectId: string, issueKey: string) => void = () => {};
+  export let obsidianApp: ObsidianApplication;
+  export let projectShellCommandsStore: ProjectShellCommandsStore;
+  export let jiraConnectionSettings: JiraConnectionSettings;
   export let gitHubActionsStore: GitHubActionsStore;
+  // The detail page writes files that several widgets read, so the dashboard has to be told when
+  // one of those writes lands.
+  export let refreshAllDashboardData: () => void = () => {};
+  export let onBack: () => void = () => {};
+
+  const shellCommandRunsByKeyStore = projectShellCommandsStore.store;
+  $: shellCommandRunsByKey = $shellCommandRunsByKeyStore;
+
+  function openChildFile(relativeChildFilePath: string): void {
+    openAbsoluteMarkdownFilePath(
+      obsidianApp,
+      nodePath.resolve(pinnedProject.folderPath, relativeChildFilePath),
+    );
+  }
+
+  function openChildFolder(relativeChildFolderPath: string): void {
+    void shell.openPath(nodePath.resolve(pinnedProject.folderPath, relativeChildFolderPath));
+  }
+
+  function runShellCommand(shellCommandIndex: number, commandLine: string): void {
+    projectShellCommandsStore.startCommandRun({
+      runKey: buildShellCommandRunKey(pinnedProject.id, shellCommandIndex),
+      workingDirectoryAbsolutePath: pinnedProject.folderPath,
+      commandLine,
+    });
+  }
+
+  function killShellCommand(shellCommandIndex: number): void {
+    projectShellCommandsStore.killCommandRun(
+      buildShellCommandRunKey(pinnedProject.id, shellCommandIndex),
+    );
+  }
+
+  function clearShellCommandOutput(shellCommandIndex: number): void {
+    projectShellCommandsStore.clearCommandRunOutput(
+      buildShellCommandRunKey(pinnedProject.id, shellCommandIndex),
+    );
+  }
+
+  function copyResumeCommandForSession(sessionId: string): void {
+    copyClaudeResumeCommandToClipboard(pinnedProject.folderPath, sessionId);
+  }
+
+  function relaunchClaudeSession(sessionId: string): void {
+    relaunchClaudeSessionInTerminal(obsidianApp, pinnedProject.folderPath, sessionId);
+  }
+
+  async function startClaudeSessionFromProjectGoals(): Promise<void> {
+    const initialPromptText = await readProjectGoalsPrompt();
+    if (initialPromptText === null) {
+      return;
+    }
+    startClaudeSessionWithPrompt(obsidianApp, pinnedProject.folderPath, initialPromptText);
+  }
+
+  async function readProjectGoalsPrompt(): Promise<string | null> {
+    try {
+      const projectGoalsMarkdown = await filesystemPromises.readFile(
+        resolveProjectGoalsFilePath(pinnedProject.folderPath),
+        "utf8",
+      );
+      return buildProjectGoalsPlanningPrompt(projectGoalsMarkdown);
+    } catch (error) {
+      if (isFileNotFoundError(error)) {
+        new Notice("GOALS.md no longer exists, refreshing");
+        refreshAllDashboardData();
+      } else {
+        new Notice("Could not read GOALS.md");
+      }
+      return null;
+    }
+  }
+
+  async function createProjectGoalsFile(): Promise<void> {
+    const absoluteGoalsFilePath = resolveProjectGoalsFilePath(pinnedProject.folderPath);
+    const vaultRelativeGoalsFilePath = resolveVaultRelativeFilePathIfWithinVault(
+      obsidianApp,
+      absoluteGoalsFilePath,
+    );
+
+    if (vaultRelativeGoalsFilePath !== null) {
+      await createProjectGoalsFileInsideVault(vaultRelativeGoalsFilePath);
+      return;
+    }
+
+    try {
+      await filesystemPromises.writeFile(absoluteGoalsFilePath, PROJECT_GOALS_FILE_TEMPLATE, {
+        encoding: "utf8",
+        flag: "wx",
+      });
+      new Notice("Created GOALS.md");
+    } catch (error) {
+      if (isFileAlreadyExistsError(error)) {
+        new Notice("GOALS.md already exists, opening it");
+      } else {
+        new Notice("Could not create GOALS.md");
+        return;
+      }
+    }
+
+    openAbsoluteMarkdownFilePath(obsidianApp, absoluteGoalsFilePath);
+    refreshAllDashboardData();
+  }
+
+  async function createProjectGoalsFileInsideVault(
+    vaultRelativeGoalsFilePath: string,
+  ): Promise<void> {
+    const existingGoalsFile = obsidianApp.vault.getAbstractFileByPath(vaultRelativeGoalsFilePath);
+    if (existingGoalsFile instanceof TFile) {
+      openExistingProjectGoalsFile(existingGoalsFile);
+      return;
+    }
+
+    try {
+      const createdGoalsFile = await obsidianApp.vault.create(
+        vaultRelativeGoalsFilePath,
+        PROJECT_GOALS_FILE_TEMPLATE,
+      );
+      new Notice("Created GOALS.md");
+      void obsidianApp.workspace.getLeaf(false).openFile(createdGoalsFile);
+      refreshAllDashboardData();
+    } catch {
+      // A create can lose a race with Obsidian's own indexing, so the file may exist by now.
+      const existingAfterFailedCreate = obsidianApp.vault.getAbstractFileByPath(
+        vaultRelativeGoalsFilePath,
+      );
+      if (existingAfterFailedCreate instanceof TFile) {
+        openExistingProjectGoalsFile(existingAfterFailedCreate);
+        return;
+      }
+      new Notice("Could not create GOALS.md");
+    }
+  }
+
+  function openExistingProjectGoalsFile(goalsFile: TFile): void {
+    new Notice("GOALS.md already exists, opening it");
+    void obsidianApp.workspace.getLeaf(false).openFile(goalsFile);
+    refreshAllDashboardData();
+  }
+
+  function openProjectGoalsFile(): void {
+    openAbsoluteMarkdownFilePath(
+      obsidianApp,
+      resolveProjectGoalsFilePath(pinnedProject.folderPath),
+    );
+  }
+
+  async function collectOpenTasksIntoProjectGoals(): Promise<void> {
+    const collectedOpenTasks = await collectAllOpenTasksForProjectFolder(pinnedProject.folderPath);
+    if (collectedOpenTasks.length === 0) {
+      new Notice("No open tasks to collect");
+      return;
+    }
+
+    const collectedTasksSectionMarkdown = buildCollectedOpenTasksSectionMarkdown(
+      collectedOpenTasks,
+      formatDailyNoteBasenameForDate(new Date()),
+    );
+    const absoluteGoalsFilePath = resolveProjectGoalsFilePath(pinnedProject.folderPath);
+
+    let mergedGoalsMarkdown: string;
+    try {
+      const existingGoalsMarkdown =
+        await readExistingProjectGoalsMarkdownOrTemplate(absoluteGoalsFilePath);
+      mergedGoalsMarkdown = mergeCollectedTasksSectionIntoGoalsMarkdown(
+        existingGoalsMarkdown,
+        collectedTasksSectionMarkdown,
+      );
+    } catch {
+      new Notice("Could not read GOALS.md");
+      return;
+    }
+
+    const wasWritten = await writeProjectGoalsMarkdown(
+      obsidianApp,
+      absoluteGoalsFilePath,
+      mergedGoalsMarkdown,
+    );
+    if (!wasWritten) {
+      new Notice("Could not write GOALS.md");
+      return;
+    }
+
+    new Notice(
+      `Collected ${collectedOpenTasks.length} ${collectedOpenTasks.length === 1 ? "task" : "tasks"} into GOALS.md`,
+    );
+    openAbsoluteMarkdownFilePath(obsidianApp, absoluteGoalsFilePath);
+    refreshAllDashboardData();
+  }
+
+  function openJiraIssueInBrowser(issueBrowserUrl: string): void {
+    void shell.openExternal(issueBrowserUrl);
+  }
+
+  function startClaudeSessionFromJiraIssue(issueKey: string): void {
+    void startClaudeSessionForJiraIssue(
+      obsidianApp,
+      jiraConnectionSettings,
+      pinnedProject.folderPath,
+      issueKey,
+    );
+  }
 
   const MAXIMUM_VISIBLE_CONTAINER_CELLS = 4;
   const FRESHNESS_GLYPH_BY_LEVEL = {
@@ -260,13 +483,13 @@
       <h3>Project actions</h3>
       <div class="project-action-row">
         {#if pinnedProject.goalsFileExists}
-          <button type="button" class="project-detail-button" on:click={() => onOpenProjectGoalsFile(pinnedProject.id)}>◇ open GOALS.md</button>
-          <button type="button" class="project-detail-button" on:click={() => onStartSessionFromProjectGoals(pinnedProject.id)}>◆ plan from goals</button>
+          <button type="button" class="project-detail-button" on:click={() => openProjectGoalsFile()}>◇ open GOALS.md</button>
+          <button type="button" class="project-detail-button" on:click={() => startClaudeSessionFromProjectGoals()}>◆ plan from goals</button>
         {:else}
-          <button type="button" class="project-detail-button" on:click={() => onCreateProjectGoalsFile(pinnedProject.id)}>＋ create GOALS.md</button>
+          <button type="button" class="project-detail-button" on:click={() => createProjectGoalsFile()}>＋ create GOALS.md</button>
         {/if}
         {#if pinnedProject.openTasks.length > 0}
-          <button type="button" class="project-detail-button" on:click={() => onCollectOpenTasksIntoProjectGoals(pinnedProject.id)}>↓ collect tasks</button>
+          <button type="button" class="project-detail-button" on:click={() => collectOpenTasksIntoProjectGoals()}>↓ collect tasks</button>
         {/if}
       </div>
     </section>
@@ -296,20 +519,20 @@
                         {#if taskIssue !== null}
                           <li class="jira-hierarchy-task">
                             <div class="jira-issue-row">
-                              <button type="button" class="jira-issue-key" on:click={() => onOpenJiraIssueInBrowser(taskIssue.issueBrowserUrl)}>{taskIssue.issueKey}</button>
+                              <button type="button" class="jira-issue-key" on:click={() => openJiraIssueInBrowser(taskIssue.issueBrowserUrl)}>{taskIssue.issueKey}</button>
                               <span class="jira-issue-summary">{taskIssue.summaryText}</span>
                               <span class="jira-issue-status">{taskIssue.statusName}</span>
-                              <button type="button" class="jira-issue-fix-button" on:click={() => onStartClaudeSessionFromJiraIssue(pinnedProject.id, taskIssue.issueKey)}>▶ fix in claude</button>
+                              <button type="button" class="jira-issue-fix-button" on:click={() => startClaudeSessionFromJiraIssue(taskIssue.issueKey)}>▶ fix in claude</button>
                             </div>
                             {#if taskNode.subtasks.length > 0}
                               <ul class="jira-hierarchy-subtask-list">
                                 {#each taskNode.subtasks as subtask (subtask.issueKey)}
                                   <li class="jira-issue-row jira-issue-row-subtask">
                                     <span aria-hidden="true">↳</span>
-                                    <button type="button" class="jira-issue-key" on:click={() => onOpenJiraIssueInBrowser(subtask.issueBrowserUrl)}>{subtask.issueKey}</button>
+                                    <button type="button" class="jira-issue-key" on:click={() => openJiraIssueInBrowser(subtask.issueBrowserUrl)}>{subtask.issueKey}</button>
                                     <span class="jira-issue-summary">{subtask.summaryText}</span>
                                     <span class="jira-issue-status">{subtask.statusName}</span>
-                                    <button type="button" class="jira-issue-fix-button" on:click={() => onStartClaudeSessionFromJiraIssue(pinnedProject.id, subtask.issueKey)}>▶ fix in claude</button>
+                                    <button type="button" class="jira-issue-fix-button" on:click={() => startClaudeSessionFromJiraIssue(subtask.issueKey)}>▶ fix in claude</button>
                                   </li>
                                 {/each}
                               </ul>
@@ -328,10 +551,10 @@
                               {#each orphanGroup.subtasks as subtask (subtask.issueKey)}
                                 <li class="jira-issue-row jira-issue-row-subtask">
                                   <span aria-hidden="true">↳</span>
-                                  <button type="button" class="jira-issue-key" on:click={() => onOpenJiraIssueInBrowser(subtask.issueBrowserUrl)}>{subtask.issueKey}</button>
+                                  <button type="button" class="jira-issue-key" on:click={() => openJiraIssueInBrowser(subtask.issueBrowserUrl)}>{subtask.issueKey}</button>
                                   <span class="jira-issue-summary">{subtask.summaryText}</span>
                                   <span class="jira-issue-status">{subtask.statusName}</span>
-                                  <button type="button" class="jira-issue-fix-button" on:click={() => onStartClaudeSessionFromJiraIssue(pinnedProject.id, subtask.issueKey)}>▶ fix in claude</button>
+                                  <button type="button" class="jira-issue-fix-button" on:click={() => startClaudeSessionFromJiraIssue(subtask.issueKey)}>▶ fix in claude</button>
                                 </li>
                               {/each}
                             </ul>
@@ -355,7 +578,7 @@
       {:else}
         <ul class="project-detail-list">
           {#each pinnedProject.openTasks as openTask (openTask.relativeFilePath + "::" + openTask.taskText)}
-            <li class="project-detail-row"><span>☐</span><span>{openTask.taskText}</span><button type="button" class="project-link-button" on:click={() => onOpenChildFile(pinnedProject.id, openTask.relativeFilePath)}>{openTask.relativeFilePath}</button></li>
+            <li class="project-detail-row"><span>☐</span><span>{openTask.taskText}</span><button type="button" class="project-link-button" on:click={() => openChildFile(openTask.relativeFilePath)}>{openTask.relativeFilePath}</button></li>
           {/each}
         </ul>
         {#if pinnedProject.openTaskCollectionWasLimited}
@@ -400,7 +623,7 @@
                   type="button"
                   class="file-tree-open-button"
                   title="Open {fileTreeRow.relativeFolderPath} in the editor"
-                  on:click={() => onOpenChildFolder(pinnedProject.id, fileTreeRow.relativeFolderPath)}
+                  on:click={() => openChildFolder(fileTreeRow.relativeFolderPath)}
                 >
                   open
                 </button>
@@ -408,7 +631,7 @@
             {:else}
               <li class="file-tree-row file-tree-file-row" style={`--file-tree-depth: ${fileTreeRow.depth}`}>
                 <span class="file-tree-file-glyph" aria-hidden="true">·</span>
-                <button type="button" class="project-link-button file-tree-file-button" on:click={() => onOpenChildFile(pinnedProject.id, fileTreeRow.relativeFilePath)}>{fileTreeRow.displayName}</button>
+                <button type="button" class="project-link-button file-tree-file-button" on:click={() => openChildFile(fileTreeRow.relativeFilePath)}>{fileTreeRow.displayName}</button>
                 <span class="file-tree-modified-time">{fileTreeRow.relativeModifiedTimeLabel}</span>
               </li>
             {/if}
@@ -425,12 +648,12 @@
         <ul class="claude-session-list">
           {#each pinnedProject.recentClaudeSessions as claudeSession (claudeSession.sessionId)}
             <li class="claude-session-row">
-              <button type="button" class="claude-session-button" on:click={() => onCopyClaudeResumeCommand(pinnedProject.id, claudeSession.sessionId)}>
+              <button type="button" class="claude-session-button" on:click={() => copyResumeCommandForSession(claudeSession.sessionId)}>
                 <span><strong>{resolveSessionHeadline(claudeSession)}</strong> {formatRelativeModifiedTime(claudeSession.lastActivityAtMilliseconds)}</span>
                 {#if resolveTopicArcSubline(claudeSession).length > 0}<span>also touched: {resolveTopicArcSubline(claudeSession)}</span>{/if}
                 <span>{claudeSession.lastUserPromptPreview}</span>
               </button>
-              <button type="button" class="project-detail-button" on:click={() => onRelaunchClaudeSession(pinnedProject.id, claudeSession.sessionId)}>▶ resume</button>
+              <button type="button" class="project-detail-button" on:click={() => relaunchClaudeSession(claudeSession.sessionId)}>▶ resume</button>
             </li>
           {/each}
         </ul>
@@ -449,12 +672,12 @@
             {@const isShellCommandRunning = shellCommandRunSnapshot?.status === "running"}
             <li class="shell-command-row">
               <div class="shell-command-header">
-                <button type="button" class="project-detail-button" disabled={isShellCommandRunning} on:click={() => onRunShellCommand(pinnedProject.id, storedShellCommand.shellCommandIndex, storedShellCommand.commandLine)}>$ {storedShellCommand.label || storedShellCommand.commandLine}</button>
+                <button type="button" class="project-detail-button" disabled={isShellCommandRunning} on:click={() => runShellCommand(storedShellCommand.shellCommandIndex, storedShellCommand.commandLine)}>$ {storedShellCommand.label || storedShellCommand.commandLine}</button>
                 <span>{describeShellCommandStatusLabel(shellCommandRunSnapshot)}</span>
                 {#if isShellCommandRunning}
-                  <button type="button" class="project-detail-button" on:click={() => onKillShellCommand(pinnedProject.id, storedShellCommand.shellCommandIndex)}>kill</button>
+                  <button type="button" class="project-detail-button" on:click={() => killShellCommand(storedShellCommand.shellCommandIndex)}>kill</button>
                 {:else if shellCommandRunSnapshot && shellCommandRunSnapshot.outputTailLines.length > 0}
-                  <button type="button" class="project-detail-button" on:click={() => onClearShellCommandOutput(pinnedProject.id, storedShellCommand.shellCommandIndex)}>clear</button>
+                  <button type="button" class="project-detail-button" on:click={() => clearShellCommandOutput(storedShellCommand.shellCommandIndex)}>clear</button>
                 {/if}
               </div>
               {#if shellCommandRunSnapshot && shellCommandRunSnapshot.outputTailLines.length > 0}

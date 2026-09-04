@@ -50,7 +50,11 @@ obsidian-dashboard/
 │   │   ├── graph.ts          # Orphans, hubs, broken links.
 │   │   ├── docker.ts         # Running container detection (Phase 5).
 │   │   ├── githubActions.ts  # Workflow runs, dispatch, re-run, cancel. Shells out to `gh`.
-│   │   └── desktopNotification.ts  # Obsidian Notice plus OS notification in one call.
+│   │   ├── desktopNotification.ts  # Obsidian Notice plus OS notification in one call.
+│   │   ├── claudeTerminal.ts   # Claude Code terminal handoff and the session row actions.
+│   │   ├── jiraClaudeHandoff.ts  # Fetch an issue and open Claude with it as the prompt.
+│   │   ├── projectGoals.ts     # GOALS.md template, paths, read/merge/write.
+│   │   └── vaultFilePaths.ts   # Vault-relative paths and opening a file in Obsidian or Zed.
 │   └── ui/
 │       ├── App.svelte        # Dashboard root. Hosts the tab bar and widget grid.
 │       ├── TabBar.svelte     # Work/Private/... tab switcher.
