@@ -8,7 +8,7 @@ This document orients future Claude Code sessions to this plugin. Read it before
 
 An Obsidian plugin that renders a "super overview" of the vault inside a workspace pane. It surfaces recently edited notes, open tasks, tag/folder statistics, graph insights (orphans, hubs, broken links), and pinned project folders with a live Docker container indicator. The dashboard is organised into tabs (default: **Work** and **Private**), each with its own folder scope, pinned projects, and widget layout.
 
-This plugin is paired with the existing community plugin `ErickRyu/obsidian-claude-code`, which provides a Claude Code terminal in the Obsidian sidebar. The two plugins are intentionally complementary: this plugin owns the dashboard surface, that plugin owns the AI terminal.
+The dashboard does not run Claude Code. Every Claude action — resume a session, plan from a project's `GOALS.md`, fix a Jira issue, plan a Procrast idea — copies a ready-to-paste `cd <folder> && claude …` command line to the clipboard. There used to be a handoff into a companion sidebar-terminal plugin; it was removed, and nothing should reintroduce a dependency on another plugin's instance or command IDs.
 
 The dashboard is also intended to be drivable from Claude Code via the built-in **Obsidian CLI** (Obsidian v1.12.4+). All user-facing commands are registered with stable IDs prefixed `vault-dashboard:` so `obsidian command run vault-dashboard:<id>` works from the terminal. Command registration arrives in the post-MVP backlog (`docs/roadmap.md`).
 
@@ -38,6 +38,8 @@ obsidian-dashboard/
 ├── docs/
 │   ├── roadmap.md            # Post-MVP backlog (read before adding features).
 │   └── design/               # Phase 1 mockups + design system reference.
+├── scripts/
+│   └── link-vault.mjs        # Copies the build into a vault's plugin folder. See "Build and develop".
 ├── src/
 │   ├── main.ts               # Plugin entry point. Registers the view + commands.
 │   ├── view.ts               # DashboardView extends ItemView. Mounts the Svelte App.
@@ -51,8 +53,8 @@ obsidian-dashboard/
 │   │   ├── docker.ts         # Running container detection (Phase 5).
 │   │   ├── githubActions.ts  # Workflow runs, dispatch, re-run, cancel. Shells out to `gh`.
 │   │   ├── desktopNotification.ts  # Obsidian Notice plus OS notification in one call.
-│   │   ├── claudeTerminal.ts   # Claude Code terminal handoff and the session row actions.
-│   │   ├── jiraClaudeHandoff.ts  # Fetch an issue and open Claude with it as the prompt.
+│   │   ├── claudeTerminal.ts   # Builds the claude command lines and copies them to the clipboard.
+│   │   ├── jiraClaudeHandoff.ts  # Fetch an issue and copy a claude command with it as the prompt.
 │   │   ├── projectGoals.ts     # GOALS.md template, paths, read/merge/write.
 │   │   └── vaultFilePaths.ts   # Vault-relative paths and opening a file in Obsidian or Zed.
 │   └── ui/
@@ -73,13 +75,22 @@ Design tokens live in `styles.css` (the `.vault-dashboard { … }` custom-proper
 which Obsidian auto-loads. There is no separate `tokens.css` — per-component styling stays
 inside each Svelte file's scoped `<style>`.
 
-The plugin is symlinked into a test vault to develop. From the plugin directory:
+The build is copied into a test vault to develop. From the plugin directory:
 
 ```bash
-ln -s "$(pwd)" "<path-to-test-vault>/.obsidian/plugins/vault-dashboard"
+npm run link -- <path-to-test-vault>
 ```
 
-After the symlink is in place, enable "Vault Dashboard" in Obsidian's Community Plugins settings.
+That copies `main.js`, `manifest.json` and `styles.css` into
+`<vault>/.obsidian/plugins/vault-dashboard/` and stores the vault path in a gitignored
+`.vaultpath`; `npm run dev` and `npm run build` then redeploy after every successful rebuild.
+
+**Never symlink the working copy into a vault.** A vault is usually its own git repository, and a
+symlink is committed as an absolute path — it resolves on the machine that made it and breaks
+Obsidian's startup on every other one (`ENOENT … stat '<vault>/.obsidian/plugins/…'`). Copies are
+identical on Linux and macOS.
+
+Once the files are in place, enable "Vault Dashboard" in Obsidian's Community Plugins settings.
 
 ---
 
@@ -192,42 +203,22 @@ the data row's grid exactly, so the glyphs are labelled rather than memorised.
 
 ---
 
-## Claude Code terminal integration (`obsidian-claude-code`)
+## Claude Code handoff
 
-The dashboard drives the companion `obsidian-claude-code` plugin (ErickRyu, manifest id `obsidian-claude-code`, "Claude Code Terminal") to resume and start Claude sessions in-app. That plugin is **not on the community registry as a prebuilt** — its GitHub releases ship only the `node-pty` natives, so it must be built from source.
+`src/data/claudeTerminal.ts` owns it, and it is deliberately small:
 
-### Local install layout
+- `buildClaudeResumeCommandLine(folderPath, sessionId)` → `cd '<folder>' && claude --resume '<id>'`
+- `buildClaudeStartCommandLine(folderPath, promptText)` → `cd '<folder>' && claude '<prompt>'`
+- `copyClaudeResumeCommandToClipboard` / `copyClaudeStartCommandToClipboard` wrap those with
+  `copyTextToClipboardWithFallback` from `src/data/clipboard.ts` and a `Notice`.
 
-- **Fork / build source**: `~/yelsed/obsidian-claude-code` (cloned, `npm install` already run, node-pty rebuilt for Obsidian's Electron via its `postinstall`).
-- **Vault install**: `<test-vault>/.obsidian/plugins/obsidian-claude-code` is a **directory symlink** to that fork (hot-reload supports directory symlinks). Rebuilding the fork redeploys `main.js` automatically; a full Obsidian restart is still needed to register a newly added plugin or a manifest change.
-- `node-pty` auto-downloads on first load via the plugin's `ensureNodePty` (needs internet once). The `claude` CLI must be on `PATH`.
+Callers: the Claude sessions widget and the pinned project detail page (resume), the detail page's
+"plan from goals" button, `src/data/jiraClaudeHandoff.ts` ("fix in claude"), and
+`src/ui/PlanProcrastIdeaModal.ts` (Procrast planning). Session metadata itself comes from
+`src/data/claudeSessions.ts`, which reads `~/.claude/projects` directly and needs no plugin.
 
-### The local patch (required for resume/goals)
-
-Upstream exposes no public API to launch claude with `--resume <id>` in an arbitrary project folder — its terminal spawns one `claude` in the vault cwd. We patch two files to add that:
-
-- `src/claude-terminal-view.ts` — adds `TerminalSpawnOverride { cwd?, extraArgs? }`, a constructor param, and applies it in `spawnClaude` (`cwd` and appended args).
-- `src/main.ts` — adds `pendingTerminalSpawnOverride`, threads it through the `registerView` factory, and adds the public method:
-  `openClaudeSessionInFolder(folderPath, resumeSessionId?, initialPromptText?)`.
-
-The patch is saved at **`integrations/obsidian-claude-code-resume.patch`**. Re-apply after an upstream update:
-
-```bash
-cd ~/yelsed/obsidian-claude-code
-git pull
-git apply ~/yelsed/obsidian-dashboard/integrations/obsidian-claude-code-resume.patch
-npm run build   # symlink redeploys main.js; restart Obsidian
-```
-
-### How the dashboard calls it
-
-`src/data/claudeTerminal.ts` owns the handoff. `launchInObsidianClaudeTerminal(app, request)`:
-1. Finds the plugin instance via `app.plugins.plugins["obsidian-claude-code"]`.
-2. If `openClaudeSessionInFolder` exists (patched build) → calls it → `"ran-in-terminal"`.
-3. Else opens the terminal (`openClaudeCodeTerminalView`, command id `obsidian-claude-code:open-claude-terminal`) + copies the command → `"copied-to-clipboard"`.
-4. Else clipboard only → `"unavailable"`. Never throws when the plugin is absent.
-
-Resume button passes `resumeSessionId`; the GOALS.md button passes `initialPromptText` (typed into a fresh claude, not auto-submitted). `setup-workspace` reuses `openClaudeCodeTerminalView` to dock the terminal.
+Shell arguments are single-quoted by `quoteShellArgument`; it is the only place that quoting lives,
+so use the builders rather than assembling a command line at a call site.
 
 ---
 
@@ -236,4 +227,3 @@ Resume button passes `resumeSessionId`; the GOALS.md button passes `initialPromp
 - **Roadmap and backlog**: `docs/roadmap.md`. Read before proposing new features. Many ideas are already triaged there.
 - **Design system**: `docs/design/` (populated by Phase 1).
 - **Original plan**: `~/.claude/plans/plugin-marketplace-add-piped-dusk.md`.
-- **Claude terminal patch**: `integrations/obsidian-claude-code-resume.patch` (re-apply after upstream updates — see the integration section above).

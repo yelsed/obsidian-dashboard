@@ -15,10 +15,9 @@
   } from "../../data/projectShellCommands";
   import {
     copyClaudeResumeCommandToClipboard,
-    relaunchClaudeSessionInTerminal,
-    startClaudeSessionWithPrompt,
+    copyClaudeStartCommandToClipboard,
   } from "../../data/claudeTerminal";
-  import { startClaudeSessionForJiraIssue } from "../../data/jiraClaudeHandoff";
+  import { copyClaudeStartCommandForJiraIssue } from "../../data/jiraClaudeHandoff";
   import {
     buildCollectedOpenTasksSectionMarkdown,
     buildProjectGoalsPlanningPrompt,
@@ -111,16 +110,12 @@
     copyClaudeResumeCommandToClipboard(pinnedProject.folderPath, sessionId);
   }
 
-  function relaunchClaudeSession(sessionId: string): void {
-    relaunchClaudeSessionInTerminal(obsidianApp, pinnedProject.folderPath, sessionId);
-  }
-
   async function startClaudeSessionFromProjectGoals(): Promise<void> {
     const initialPromptText = await readProjectGoalsPrompt();
     if (initialPromptText === null) {
       return;
     }
-    startClaudeSessionWithPrompt(obsidianApp, pinnedProject.folderPath, initialPromptText);
+    copyClaudeStartCommandToClipboard(pinnedProject.folderPath, initialPromptText);
   }
 
   async function readProjectGoalsPrompt(): Promise<string | null> {
@@ -262,9 +257,8 @@
     void shell.openExternal(issueBrowserUrl);
   }
 
-  function startClaudeSessionFromJiraIssue(issueKey: string): void {
-    void startClaudeSessionForJiraIssue(
-      obsidianApp,
+  function copyClaudeStartCommandFromJiraIssue(issueKey: string): void {
+    void copyClaudeStartCommandForJiraIssue(
       jiraConnectionSettings,
       pinnedProject.folderPath,
       issueKey,
@@ -522,7 +516,7 @@
                               <button type="button" class="jira-issue-key" on:click={() => openJiraIssueInBrowser(taskIssue.issueBrowserUrl)}>{taskIssue.issueKey}</button>
                               <span class="jira-issue-summary">{taskIssue.summaryText}</span>
                               <span class="jira-issue-status">{taskIssue.statusName}</span>
-                              <button type="button" class="jira-issue-fix-button" on:click={() => startClaudeSessionFromJiraIssue(taskIssue.issueKey)}>▶ fix in claude</button>
+                              <button type="button" class="jira-issue-fix-button" on:click={() => copyClaudeStartCommandFromJiraIssue(taskIssue.issueKey)}>▶ fix in claude</button>
                             </div>
                             {#if taskNode.subtasks.length > 0}
                               <ul class="jira-hierarchy-subtask-list">
@@ -532,7 +526,7 @@
                                     <button type="button" class="jira-issue-key" on:click={() => openJiraIssueInBrowser(subtask.issueBrowserUrl)}>{subtask.issueKey}</button>
                                     <span class="jira-issue-summary">{subtask.summaryText}</span>
                                     <span class="jira-issue-status">{subtask.statusName}</span>
-                                    <button type="button" class="jira-issue-fix-button" on:click={() => startClaudeSessionFromJiraIssue(subtask.issueKey)}>▶ fix in claude</button>
+                                    <button type="button" class="jira-issue-fix-button" on:click={() => copyClaudeStartCommandFromJiraIssue(subtask.issueKey)}>▶ fix in claude</button>
                                   </li>
                                 {/each}
                               </ul>
@@ -554,7 +548,7 @@
                                   <button type="button" class="jira-issue-key" on:click={() => openJiraIssueInBrowser(subtask.issueBrowserUrl)}>{subtask.issueKey}</button>
                                   <span class="jira-issue-summary">{subtask.summaryText}</span>
                                   <span class="jira-issue-status">{subtask.statusName}</span>
-                                  <button type="button" class="jira-issue-fix-button" on:click={() => startClaudeSessionFromJiraIssue(subtask.issueKey)}>▶ fix in claude</button>
+                                  <button type="button" class="jira-issue-fix-button" on:click={() => copyClaudeStartCommandFromJiraIssue(subtask.issueKey)}>▶ fix in claude</button>
                                 </li>
                               {/each}
                             </ul>
@@ -653,7 +647,6 @@
                 {#if resolveTopicArcSubline(claudeSession).length > 0}<span>also touched: {resolveTopicArcSubline(claudeSession)}</span>{/if}
                 <span>{claudeSession.lastUserPromptPreview}</span>
               </button>
-              <button type="button" class="project-detail-button" on:click={() => relaunchClaudeSession(claudeSession.sessionId)}>▶ resume</button>
             </li>
           {/each}
         </ul>

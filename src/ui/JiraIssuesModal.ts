@@ -1,7 +1,7 @@
 import { App, Modal, Setting } from "obsidian";
 import { shell } from "electron";
 import type { JiraIssueSummary } from "../data/jira";
-import { startClaudeSessionForJiraIssue } from "../data/jiraClaudeHandoff";
+import { copyClaudeStartCommandForJiraIssue } from "../data/jiraClaudeHandoff";
 import type { JiraConnectionSettings } from "../settings";
 import { buildJiraSprintEpicHierarchy, describeEpicGroupHeading } from "./jiraHierarchy";
 
@@ -192,11 +192,10 @@ export class JiraIssuesModal extends Modal {
     });
     fixButton.setAttribute(
       "title",
-      `Open Claude Code in this folder with the full ${issue.issueKey} ticket`,
+      `Copy a Claude Code command for this folder with the full ${issue.issueKey} ticket`,
     );
     fixButton.addEventListener("click", () => {
-      void startClaudeSessionForJiraIssue(
-        this.obsidianApplication,
+      void copyClaudeStartCommandForJiraIssue(
         this.parameters.jiraConnectionSettings,
         this.parameters.pinnedProjectFolderPath,
         issue.issueKey,

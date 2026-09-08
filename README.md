@@ -2,7 +2,7 @@
 
 An Obsidian plugin that renders a "super overview" of the vault in a workspace pane: recently edited notes, open tasks, tag/folder stats, graph insights (orphans, hubs, broken links), and pinned project folders with a live Docker container indicator. Organised into tabs (default **Work** and **Private**), each with its own folder scope and widgets.
 
-Pairs with [`ErickRyu/obsidian-claude-code`](https://github.com/ErickRyu/obsidian-claude-code): this plugin owns the dashboard surface, that plugin owns the AI terminal.
+Claude Code actions (resume a session, plan from `GOALS.md`, fix a Jira issue) copy a ready-to-paste `cd … && claude …` command line to the clipboard. The dashboard observes; it never spawns a terminal itself.
 
 ## Requirements
 
@@ -17,13 +17,14 @@ git clone <this-repo> obsidian-dashboard
 cd obsidian-dashboard
 npm install
 npm run build
+npm run link -- /path/to/vault
 ```
 
-Symlink into a vault:
-
-```bash
-ln -s "$(pwd)" "<vault>/.obsidian/plugins/vault-dashboard"
-```
+`npm run link` copies `main.js`, `manifest.json` and `styles.css` into
+`<vault>/.obsidian/plugins/vault-dashboard/` and remembers the vault in a gitignored `.vaultpath`,
+so later builds redeploy on their own. It is deliberately a copy and not a symlink: a symlink into
+the vault gets committed by the vault's own git repository as an absolute path, which then resolves
+on exactly one machine. `OBSIDIAN_VAULT` works instead of the argument.
 
 Then enable **Vault Dashboard** in Obsidian → Community Plugins.
 
@@ -32,9 +33,13 @@ Then enable **Vault Dashboard** in Obsidian → Community Plugins.
 ```bash
 npm run dev     # esbuild watch
 npm run build   # production build + type-check
+npm run link    # copy the current build into the remembered vault
 ```
 
-Reload after changes: command palette → "Reload app without saving", or toggle the plugin off/on. Manifest changes require a full Obsidian restart.
+Both `dev` and `build` copy into the linked vault after every successful rebuild, so
+[`pjeby/hot-reload`](https://github.com/pjeby/hot-reload) picks the new `main.js` up on its own.
+Without it: command palette → "Reload app without saving", or toggle the plugin off and on.
+Manifest changes still require a full Obsidian restart.
 
 ## Stack
 
@@ -46,7 +51,6 @@ TypeScript (strict) · Svelte 4 · esbuild · `esbuild-svelte` · `svelte-prepro
 - `PRODUCT.md` — product purpose, principles, brand
 - `docs/roadmap.md` — post-MVP backlog
 - `docs/design/` — design system reference
-- `integrations/obsidian-claude-code-resume.patch` — patch enabling `--resume` and project-scoped Claude sessions in the companion terminal plugin
 
 ## License
 

@@ -6,7 +6,7 @@ product
 
 ## Users
 
-Primary: a single developer-leaning Obsidian power user who lives in the vault daily and pairs notes with code. The user keeps a `Work` context and a `Private` context in the same vault and runs a sidebar Claude Code terminal (`ErickRyu/obsidian-claude-code`) next to the dashboard.
+Primary: a single developer-leaning Obsidian power user who lives in the vault daily and pairs notes with code. The user keeps a `Work` context and a `Private` context in the same vault and runs Claude Code in a terminal next to Obsidian.
 
 Secondary: a small group of like-minded power users — comfortable in a terminal, opinionated about typography and density, allergic to soft-SaaS dashboards. They would adopt this plugin if it shipped, but the design does not bend to make it discoverable to a casual Obsidian user.
 
@@ -14,9 +14,9 @@ The job to be done: open the dashboard once in the morning, get a vault-scale su
 
 ## Product Purpose
 
-A workspace pane inside Obsidian that renders a single super-overview of the vault. It is complementary to the sidebar Claude Code terminal — the dashboard owns context and observation, the terminal owns conversation and action. Together they form the user's morning ritual: glance at the dashboard, kick off the day from the terminal.
+A workspace pane inside Obsidian that renders a single super-overview of the vault. It is complementary to the terminal the user already has open — the dashboard owns context and observation, the terminal owns conversation and action. Together they form the user's morning ritual: glance at the dashboard, kick off the day from the terminal.
 
-Success looks like: the user opens the dashboard each morning without thinking about it, gets a complete read of vault state in under five seconds, and uses the pinned-projects widget as the launch point for `npm run dev`, `docker compose up`, daily-note creation, and Claude sessions — all triggered through the existing Obsidian Command palette / Obsidian CLI / sidebar terminal, never re-implemented inside the plugin.
+Success looks like: the user opens the dashboard each morning without thinking about it, gets a complete read of vault state in under five seconds, and uses the pinned-projects widget as the launch point for `npm run dev`, `docker compose up`, daily-note creation, and Claude sessions — all triggered through the existing Obsidian Command palette / Obsidian CLI, or handed to the user's own terminal as a command line, never re-implemented inside the plugin.
 
 The dashboard is also Claude-Code-drivable: every user-facing command registers a stable `vault-dashboard:<id>` so `obsidian command run …` from a terminal session works end-to-end.
 
@@ -24,7 +24,7 @@ The dashboard is also Claude-Code-drivable: every user-facing command registers 
 
 Three words: **terminal, expert, calm.**
 
-- **Terminal** — monospace typography, box-drawing characters, ANSI-flavoured accents, hairline borders, square corners, no shadows. Reads as a single TUI surface when seen next to the Claude Code sidebar.
+- **Terminal** — monospace typography, box-drawing characters, ANSI-flavoured accents, hairline borders, square corners, no shadows. Reads as a single TUI surface when seen next to a terminal.
 - **Expert** — assumes a power user. No tutorial copy, no onboarding hand-holding, no "Did you know?" tooltips. Empty states are short and a little dry ("Nothing open in this tab's scope. Clean.").
 - **Calm** — almost no motion. Status dots do not pulse unless a Docker container is actively running. Tab switches do not fade. The dashboard's job is to be glanceable, not animated.
 
@@ -43,9 +43,9 @@ The dashboard must not look or feel like:
 
 1. **TUI native, not TUI cosplay.** The dashboard is a real Svelte UI that happens to read like a terminal. Box characters and monospace are tools for alignment and density, not aesthetic decoration. Anything that does not earn its character cells gets cut.
 2. **Tab is the unit of scope.** Every widget filters by the active tab's folder scope, every setting belongs to a tab, every command takes a tab name. The dashboard never reads "the whole vault" when a tab declares scope.
-3. **The dashboard observes; the terminal acts.** No buttons that run shell scripts directly. Anything that executes goes through the Claude Code terminal so the user sees the output. The dashboard launches actions, it does not perform them.
+3. **The dashboard observes; the terminal acts.** No buttons that run shell scripts directly. Anything that executes is handed to the user's terminal as a command line so they see the output. The dashboard launches actions, it does not perform them.
 4. **Inherit Obsidian theme, never override.** Every colour, background, border, and accent resolves through an Obsidian CSS variable (`--background-primary`, `--text-normal`, `--color-green`, `--interactive-accent`, etc.). The dashboard therefore tracks the user's active theme — stock light, stock dark, or any community theme — automatically and without a JS listener. No hardcoded hex values, no plugin-specific palette.
-5. **External integrations degrade silently.** Docker missing → indicator hides. Procrast missing → widget shows an empty state. Claude terminal missing → fallback to clipboard with a one-line hint. Never a stack trace, never a red banner.
+5. **External integrations degrade silently.** Docker missing → indicator hides. Procrast missing → widget shows an empty state. Claude actions hand over a command line rather than running it. Never a stack trace, never a red banner.
 6. **Stability over surface area.** Stable command IDs prefixed `vault-dashboard:` are public contract. Settings schemas migrate forward. New tabs and widgets are additive; renames require migrations.
 
 ## Accessibility & Inclusion

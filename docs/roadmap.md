@@ -12,17 +12,13 @@ Features that are wanted, agreed on, and queued to ship after the MVP is stable.
 
 ### Claude Code integration
 
-The plugin runs alongside the existing `ErickRyu/obsidian-claude-code` plugin, which provides a Claude Code terminal in the sidebar. The dashboard becomes much more useful once it can also drive that terminal.
+Claude Code runs in the user's own terminal. The dashboard's part is to build the right command
+line and hand it over via the clipboard (`src/data/claudeTerminal.ts`); it does not talk to a
+terminal process. Anything below that needs a running session to talk to is out of scope.
 
-- **Claude sessions widget per tab.** Each tab tracks the Claude conversations started from its surface (start time, label, working directory, source action). Clicking a session entry resumes it in the sidebar. Provides a per-tab "what was I working on" recall.
-- **Stored shell commands per pinned project.** Each pinned project keeps a small list of named shell commands (for example, `npm run dev`, `git status`, `docker compose up`). Clicking a command sends it to the Claude Code terminal with the project folder as the working directory. The project card becomes a launcher.
-- **"Start day" daily ritual per tab.** A single button on the tab header opens that tab's daily note, lists yesterday's incomplete tasks, and sends a configurable morning prompt to Claude with the tab's pinned projects supplied as context. One click, full warm-up.
-
-**Inter-process communication layers to investigate**, in order of preference:
-
-1. Direct API surface on the `obsidian-claude-code` plugin (preferred). Check whether it exposes a callable method or event to inject prompts into a session.
-2. `app.commands.executeCommandById("obsidian-claude-code:<command>")` combined with clipboard injection and focus stealing.
-3. Copy command to clipboard, show a toast that says "Press Cmd+V in the terminal". Acceptable but friction-heavy.
+- **Claude sessions widget per tab.** Each tab tracks the Claude conversations started from its surface (start time, label, working directory, source action). Clicking a session entry copies its resume command. Provides a per-tab "what was I working on" recall.
+- **Stored shell commands per pinned project.** Each pinned project keeps a small list of named shell commands (for example, `npm run dev`, `git status`, `docker compose up`). Clicking a command copies it with a `cd` into the project folder. The project card becomes a launcher.
+- **"Start day" daily ritual per tab.** A single button on the tab header opens that tab's daily note, lists yesterday's incomplete tasks, and copies a configurable morning prompt for Claude with the tab's pinned projects supplied as context. One click, full warm-up.
 
 All features should work even at layer 3 — degrade gracefully if no API is exposed.
 
@@ -31,7 +27,7 @@ All features should work even at layer 3 — degrade gracefully if no API is exp
 The user runs a separate CLI called `procrast` for capturing ideas. The dashboard should be aware of it but not threaded through every widget.
 
 - **Procrast widget**, opt-in per tab, off by default. Shells `procrast list --json` and renders idea cards.
-- **"Plan Here" flow.** Click on an idea card opens a modal with a folder picker (existing folders plus "New folder…"). On confirmation, the plugin creates the folder if needed, sends `/procrast:plan-idea <uuid>` to the Claude Code terminal with the chosen folder as the working directory, and records the idea-UUID-to-folder mapping in plugin data.
+- **"Plan Here" flow.** Click on an idea card opens a modal with a folder picker (existing folders plus "New folder…"). On confirmation, the plugin creates the folder if needed, copies a `cd <folder> && claude '/procrast:plan-idea <uuid>'` command line, and records the idea-UUID-to-folder mapping in plugin data.
 - **Folder badge for Procrast origin.** Folders created via the Plan Here flow display a "from Procrast idea" badge so the relationship is visible from the dashboard.
 
 ### Quick capture
@@ -85,7 +81,7 @@ Edge cases that are handled, so nobody re-discovers them the hard way:
 
 ### Workspace layout setup
 
-- A "Setup workspace" command opens the dashboard in the main pane and the Claude Code terminal in the right sidebar, then offers to save the result as the startup layout.
+- A "Setup workspace" command opens the dashboard in the main pane, then offers to save the result as the startup layout.
 
 ---
 
@@ -109,7 +105,7 @@ Explicitly will not be built unless the constraints change.
 
 - **Mobile support.** The plugin is desktop-only because we rely on Node APIs (`child_process`) for Docker detection and Procrast CLI shell-outs. Obsidian Mobile has no Node runtime.
 - **Time-travel slider.** Replaying the state of the vault on a previous day was an early creative idea but is too invasive to scope reliably.
-- **Two-way command-center buttons** that run arbitrary shell scripts directly from the dashboard. Anything that runs a shell command should go through the Claude Code terminal so the user sees the output. This bans *arbitrary* shell only. Fixed subcommands of a known tool with validated arguments, like the GitHub Actions widget's `gh workflow run` / `gh run rerun` / `gh run cancel`, are allowed, because there is no command line for the user to compose and the output that matters lives on github.com.
+- **Two-way command-center buttons** that run arbitrary shell scripts directly from the dashboard. Anything that runs a shell command should be handed to the user's terminal as a command line so they see the output. This bans *arbitrary* shell only. Fixed subcommands of a known tool with validated arguments, like the GitHub Actions widget's `gh workflow run` / `gh run rerun` / `gh run cancel`, are allowed, because there is no command line for the user to compose and the output that matters lives on github.com.
 - **Publishing to the Obsidian community plugin registry.** This is a personal tool; the maintenance and review overhead of public distribution is not worth it right now.
 
 ---
@@ -118,7 +114,7 @@ Explicitly will not be built unless the constraints change.
 
 Short notes on choices that have already been made and shouldn't be re-litigated without a strong reason.
 
-- **The terminal half of the original idea is delegated to `ErickRyu/obsidian-claude-code`.** We deliberately do not embed our own terminal — they ship xterm.js + node-pty with no Python bridge and have already solved Claude Code integration.
+- **No terminal, embedded or borrowed.** The dashboard used to drive a companion sidebar-terminal plugin (`ErickRyu/obsidian-claude-code`) through its plugin instance and command IDs. That coupling was removed: it needed a locally patched build of someone else's plugin, and a plugin folder symlinked into the vault, which broke Obsidian's startup on every machine that had not made the symlink. Claude actions now copy a command line for the user's own terminal.
 - **The "Work / Private" split is implemented as tabs, not a single toggle.** Each tab owns its scope folders, widgets, and pinned projects independently. The model also generalises beyond two tabs — you can add Learning, Side projects, etc.
 - **The Procrast widget is opt-in per tab and off by default.** Procrast is part of the user's wider workflow, but it should not be omnipresent. Each tab decides whether it cares.
 - **Design comes before widget implementation.** Phase 1 of the plan locks the design tokens and produces static mockups of every widget. Subsequent phases implement against the locked design.

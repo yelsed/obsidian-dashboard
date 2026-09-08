@@ -2,7 +2,7 @@ import { App, Modal, Notice, Setting } from "obsidian";
 import { promises as filesystemPromises } from "fs";
 import nodePath from "path";
 import os from "os";
-import { launchInObsidianClaudeTerminal } from "../data/claudeTerminal";
+import { copyClaudeStartCommandToClipboard } from "../data/claudeTerminal";
 import {
   readOpenProcrastIdeas,
   resolveProcrastIdeaTitle,
@@ -295,11 +295,7 @@ async function executePlanProcrastIdeaSelection(
   await request.replaceSettings(nextSettings);
 
   const initialPromptText = `${PROCRAST_PLAN_PROMPT_PREFIX} ${selection.idea.uuid}`;
-  await launchInObsidianClaudeTerminal(request.obsidianApp, {
-    workingDirectoryAbsolutePath: targetFolderPath,
-    initialPromptText,
-    fallbackShellCommandLine: buildClaudeStartCommandLine(targetFolderPath, initialPromptText),
-  });
+  copyClaudeStartCommandToClipboard(targetFolderPath, initialPromptText);
 }
 
 async function createTargetFolderIfNeeded(targetFolderPath: string): Promise<boolean> {
@@ -428,12 +424,4 @@ function resolveEnteredFolderPath(rawFolderPath: string): string {
 
 function folderPathsPointToSameLocation(leftFolderPath: string, rightFolderPath: string): boolean {
   return nodePath.resolve(leftFolderPath) === nodePath.resolve(rightFolderPath);
-}
-
-function buildClaudeStartCommandLine(folderPath: string, initialPromptText: string): string {
-  return `cd ${quoteShellArgument(folderPath)} && claude ${quoteShellArgument(initialPromptText)}`;
-}
-
-function quoteShellArgument(argumentValue: string): string {
-  return `'${argumentValue.replace(/'/g, "'\\''")}'`;
 }
