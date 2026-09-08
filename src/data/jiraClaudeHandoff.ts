@@ -1,12 +1,11 @@
-import { Notice, type App } from "obsidian";
+import { Notice } from "obsidian";
 import { buildClaudePromptForJiraIssue, fetchJiraIssueDetail } from "./jira";
-import { startClaudeSessionWithPrompt } from "./claudeTerminal";
+import { copyClaudeStartCommandToClipboard } from "./claudeTerminal";
 import type { JiraConnectionSettings } from "../settings";
 
 // Offered from both the issue list on the project detail page and the full issue browser modal, so
-// the fetch, the prompt and the terminal handoff live together rather than in either surface.
-export async function startClaudeSessionForJiraIssue(
-  obsidianApplication: App,
+// the fetch, the prompt and the clipboard handoff live together rather than in either surface.
+export async function copyClaudeStartCommandForJiraIssue(
   jiraConnectionSettings: JiraConnectionSettings,
   pinnedProjectFolderPath: string,
   issueKey: string,
@@ -17,8 +16,7 @@ export async function startClaudeSessionForJiraIssue(
     new Notice(`Could not load ${issueKey}: ${detailResult.message}`);
     return;
   }
-  startClaudeSessionWithPrompt(
-    obsidianApplication,
+  copyClaudeStartCommandToClipboard(
     pinnedProjectFolderPath,
     buildClaudePromptForJiraIssue(detailResult.issue),
   );

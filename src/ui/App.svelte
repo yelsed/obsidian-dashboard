@@ -987,7 +987,6 @@
             isCollapsed={collapsedWidgetIdentifiersForActiveTab.has("claude-sessions")}
             onToggleCollapsed={() => handleToggleWidgetCollapsed("claude-sessions")}
             pinnedProjects={$pinnedProjectsForWidgetData}
-            {obsidianApp}
           />
         </div>
       {/if}

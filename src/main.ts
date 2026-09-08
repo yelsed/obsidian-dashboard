@@ -5,7 +5,6 @@ import { DashboardView, VAULT_DASHBOARD_VIEW_TYPE } from "./view";
 import { VaultDashboardSettingsTab } from "./ui/SettingsTab";
 import { WorkspaceStartupPromptModal } from "./ui/WorkspaceStartupPromptModal";
 import { registerDashboardCommands, refreshDynamicTabCommands } from "./commands";
-import { openClaudeCodeTerminalView } from "./data/claudeTerminal";
 import { rollOverOpenTasksIntoCurrentDailyNote } from "./data/rollover";
 import {
   DEFAULT_PLUGIN_SETTINGS,
@@ -155,12 +154,6 @@ export default class VaultDashboardPlugin extends Plugin {
 
   async setUpDashboardWorkspaceLayout(): Promise<void> {
     await this.activateDashboardView();
-
-    const claudeTerminalOpened = openClaudeCodeTerminalView(this.app);
-    if (!claudeTerminalOpened) {
-      new Notice("Install obsidian-claude-code to dock the Claude terminal");
-    }
-
     this.maybePromptToSaveWorkspaceLayoutForStartup();
   }
 

@@ -3,8 +3,26 @@ import esbuildSvelte from "esbuild-svelte";
 import sveltePreprocess from "svelte-preprocess";
 import builtinModules from "builtin-modules";
 import process from "node:process";
+import { copyBuildArtifactsIntoLinkedVault } from "./scripts/link-vault.mjs";
 
 const isProductionBuild = process.argv[2] === "production";
+
+// Keeps the linked vault's plugin folder in step with every rebuild, so `npm run dev` plus the
+// hot-reload plugin reloads the dashboard without a symlink into the vault.
+const copyIntoLinkedVaultPlugin = {
+  name: "copy-into-linked-vault",
+  setup(build) {
+    build.onEnd((buildResult) => {
+      if (buildResult.errors.length > 0) {
+        return;
+      }
+      const pluginFolderPath = copyBuildArtifactsIntoLinkedVault();
+      if (pluginFolderPath !== null) {
+        console.log(`[link-vault] copied build into ${pluginFolderPath}`);
+      }
+    });
+  },
+};
 
 const externalDependencies = [
   "obsidian",
@@ -41,6 +59,7 @@ const context = await esbuild.context({
       compilerOptions: { css: "injected" },
       preprocess: sveltePreprocess(),
     }),
+    copyIntoLinkedVaultPlugin,
   ],
 });
 

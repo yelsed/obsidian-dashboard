@@ -11,6 +11,9 @@ main.js.map
 data.json
 .hotreload
 
+# Vault this working copy is linked into (per machine)
+.vaultpath
+
 # Environment / secrets
 .env
 .env.local

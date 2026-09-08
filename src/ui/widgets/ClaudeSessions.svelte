@@ -1,11 +1,7 @@
 <script lang="ts">
-  import type { App as ObsidianApplication } from "obsidian";
   import { formatRelativeModifiedTime } from "../../data/format";
   import type { PinnedProjectForWidget } from "../../data/pinnedProjects";
-  import {
-    copyClaudeResumeCommandToClipboard,
-    relaunchClaudeSessionInTerminal,
-  } from "../../data/claudeTerminal";
+  import { copyClaudeResumeCommandToClipboard } from "../../data/claudeTerminal";
   import WidgetPanel from "./WidgetPanel.svelte";
 
   type FlattenedClaudeSession = {
@@ -46,7 +42,6 @@
   export let pinnedProjects: PinnedProjectForWidget[] = [];
   export let isCollapsed: boolean = false;
   export let onToggleCollapsed: () => void = () => {};
-  export let obsidianApp: ObsidianApplication;
 
   $: flattenedRecentSessions = flattenSessionsAcrossPinnedProjects(pinnedProjects);
 
@@ -122,20 +117,11 @@
               </span>
             {/if}
           </button>
-          <button
-            type="button"
-            class="claude-session-relaunch-button"
-            title="Resume this session in the Obsidian Claude Code terminal"
-            on:click={() => relaunchClaudeSessionInTerminal(obsidianApp, claudeSession.projectFolderPath, claudeSession.sessionId)}
-          >
-            <span class="claude-session-relaunch-glyph" aria-hidden="true">▶</span>
-            resume
-          </button>
         </li>
       {/each}
     </ul>
     <p class="widget-footnote">
-      Showing {flattenedRecentSessions.length} most recent — click to copy, or resume in the terminal.
+      Showing {flattenedRecentSessions.length} most recent — click to copy the resume command.
     </p>
   {/if}
 </WidgetPanel>
@@ -182,37 +168,6 @@
   .claude-session-button:focus-visible {
     outline: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-accent);
     outline-offset: 2px;
-  }
-
-  .claude-session-relaunch-button {
-    appearance: none;
-    background: transparent;
-    border: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-default);
-    padding: var(--vault-dashboard-space-row) var(--vault-dashboard-space-inline);
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: var(--vault-dashboard-space-row);
-    color: var(--vault-dashboard-text-secondary);
-    font: inherit;
-    font-size: var(--vault-dashboard-font-size-label);
-    cursor: pointer;
-    transition: border-color var(--vault-dashboard-motion-duration-quick) var(--vault-dashboard-motion-easing-snap),
-                color var(--vault-dashboard-motion-duration-quick) var(--vault-dashboard-motion-easing-snap);
-  }
-
-  .claude-session-relaunch-button:hover {
-    border-color: var(--vault-dashboard-color-accent-cyan);
-    color: var(--vault-dashboard-color-accent-cyan);
-  }
-
-  .claude-session-relaunch-button:focus-visible {
-    outline: var(--vault-dashboard-border-width) solid var(--vault-dashboard-border-color-accent);
-    outline-offset: 2px;
-  }
-
-  .claude-session-relaunch-glyph {
-    color: var(--vault-dashboard-color-accent-cyan);
   }
 
   .claude-session-row-top {
