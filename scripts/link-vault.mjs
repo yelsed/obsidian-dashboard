@@ -7,6 +7,7 @@ import process from "node:process";
 
 const PLUGIN_FOLDER_NAME = "vault-dashboard";
 const BUILD_ARTIFACT_FILE_NAMES = ["main.js", "manifest.json", "styles.css"];
+const SETTINGS_FILE_NAME = "data.json";
 
 const repositoryRootPath = path.resolve(import.meta.dirname, "..");
 const storedVaultPathFilePath = path.join(repositoryRootPath, ".vaultpath");
@@ -34,9 +35,26 @@ function resolveVaultPath(requestedVaultPath) {
   return absoluteVaultPath;
 }
 
+// The plugin folder used to be a symlink to this working copy, which put Obsidian's data.json
+// here in the repository root. Copying the build into a real folder leaves that settings file
+// behind, and Obsidian silently starts the vault on blank default tabs. Carry it across once.
+function carryOverSettingsFromSymlinkInstall(pluginFolderPath) {
+  const destinationSettingsPath = path.join(pluginFolderPath, SETTINGS_FILE_NAME);
+  if (existsSync(destinationSettingsPath)) {
+    return;
+  }
+  const legacySettingsPath = path.join(repositoryRootPath, SETTINGS_FILE_NAME);
+  if (!existsSync(legacySettingsPath)) {
+    return;
+  }
+  copyFileSync(legacySettingsPath, destinationSettingsPath);
+  console.log(`Carried ${SETTINGS_FILE_NAME} over from the old symlink install.`);
+}
+
 export function copyBuildArtifactsIntoVault(vaultPath) {
   const pluginFolderPath = path.join(vaultPath, ".obsidian", "plugins", PLUGIN_FOLDER_NAME);
   mkdirSync(pluginFolderPath, { recursive: true });
+  carryOverSettingsFromSymlinkInstall(pluginFolderPath);
 
   for (const artifactFileName of BUILD_ARTIFACT_FILE_NAMES) {
     const sourceFilePath = path.join(repositoryRootPath, artifactFileName);
